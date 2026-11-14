@@ -1,7 +1,12 @@
 import { createSignal, onSettled, Show } from "solid-js";
-import { IconCheck, IconCopy } from "./Icons.jsx";
+import { IconCheck, IconCopy } from "./Icons";
 
-async function copyText(text) {
+interface CodeBlockProps {
+  code: string;
+  lang?: string;
+}
+
+async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -27,9 +32,9 @@ async function copyText(text) {
   }
 }
 
-export function CodeBlock(props) {
+export function CodeBlock(props: CodeBlockProps) {
   const [copied, setCopied] = createSignal(false);
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   onSettled(() => () => {
     if (timer) clearTimeout(timer);

@@ -4,13 +4,15 @@ import {
   idbDelete,
   idbGetAll,
   idbPut,
-} from "./idb.js";
-import { clamp, uid } from "./utils.js";
+  type StoredConversation,
+} from "./idb";
+import { clamp, uid } from "./utils";
+import type { ChatMessage, Conversation, Settings, Theme } from "./types";
 
 const SETTINGS_KEY = "qwen-coder-settings";
 const THEME_KEY = "qwen-coder-theme";
 
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: Settings = {
   systemPrompt:
     "You are Qwen Coder, a concise and helpful coding assistant. Answer with Markdown. Put code in fenced code blocks with a language tag. Explain the important parts briefly, and mention trade-offs or edge cases when they matter.",
   temperature: 0.6,
@@ -21,7 +23,7 @@ export const DEFAULT_SETTINGS = {
   dtype: "q4",
 };
 
-export function createConversation() {
+export function createConversation(): Conversation {
   const now = Date.now();
   return {
     id: uid("chat"),
@@ -32,15 +34,16 @@ export function createConversation() {
   };
 }
 
-export async function loadConversations() {
+export async function loadConversations(): Promise<Conversation[]> {
   try {
-    const records = await idbGetAll(CHAT_STORE);
+    const records = await idbGetAll<StoredConversation>(CHAT_STORE);
     return records
       .map((record) => ({
         ...record,
         // A placeholder can be left behind if the tab closed mid-generation.
         messages: (record.messages ?? []).filter(
-          (message) => message.role !== "assistant" || message.content || message.error,
+          (message: ChatMessage) =>
+            message.role !== "assistant" || message.content || message.error,
         ),
       }))
       .filter((record) => record.messages.length > 0)
@@ -50,14 +53,14 @@ export async function loadConversations() {
   }
 }
 
-export async function saveConversation(conversation) {
+export async function saveConversation(conversation: Conversation): Promise<void> {
   const messages = conversation.messages.map((message) => {
     const { streaming, ...rest } = message;
     return rest;
   });
 
   try {
-    await idbPut(CHAT_STORE, {
+    await idbPut<StoredConversation>(CHAT_STORE, {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.createdAt,
@@ -69,7 +72,7 @@ export async function saveConversation(conversation) {
   }
 }
 
-export async function deleteConversationRecord(id) {
+export async function deleteConversationRecord(id: string): Promise<void> {
   try {
     await idbDelete(CHAT_STORE, id);
   } catch {
@@ -77,7 +80,7 @@ export async function deleteConversationRecord(id) {
   }
 }
 
-export async function clearConversationRecords() {
+export async function clearConversationRecords(): Promise<void> {
   try {
     await idbClear(CHAT_STORE);
   } catch {
@@ -85,11 +88,11 @@ export async function clearConversationRecords() {
   }
 }
 
-export function loadSettings() {
+export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Partial<Settings>;
 
     return {
       ...DEFAULT_SETTINGS,
@@ -112,7 +115,7 @@ export function loadSettings() {
   }
 }
 
-export function persistSettings(settings) {
+export function persistSettings(settings: Settings): void {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
@@ -120,7 +123,7 @@ export function persistSettings(settings) {
   }
 }
 
-export function loadTheme() {
+export function loadTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_KEY);
     if (stored === "light" || stored === "dark") return stored;
@@ -134,7 +137,7 @@ export function loadTheme() {
   }
 }
 
-export function persistTheme(theme) {
+export function persistTheme(theme: Theme): void {
   try {
     localStorage.setItem(THEME_KEY, theme);
   } catch {

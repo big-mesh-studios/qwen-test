@@ -1,11 +1,16 @@
 import { createSignal, onSettled, Show } from "solid-js";
-import { formatDuration, formatTime } from "../lib/utils.js";
-import { IconAlert, IconCheck, IconCode, IconCopy } from "./Icons.jsx";
-import { Markdown } from "./Markdown.jsx";
+import { formatDuration, formatTime } from "../lib/utils";
+import type { ChatMessage as ChatMessageModel } from "../lib/types";
+import { IconAlert, IconCheck, IconCode, IconCopy } from "./Icons";
+import { Markdown } from "./Markdown";
 
-export function ChatMessage(props) {
+interface ChatMessageProps {
+  message: ChatMessageModel;
+}
+
+export function ChatMessage(props: ChatMessageProps) {
   const [copied, setCopied] = createSignal(false);
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   onSettled(() => () => {
     if (timer) clearTimeout(timer);
@@ -77,10 +82,10 @@ export function ChatMessage(props) {
 
           <Show when={props.message.role === "assistant" && props.message.meta?.tokens}>
             <span class="meta-sep">·</span>
-            <span>{props.message.meta.tokens} tokens</span>
+            <span>{props.message.meta?.tokens} tokens</span>
             <Show when={props.message.meta?.elapsed}>
               <span class="meta-sep">·</span>
-              <span>{formatDuration(props.message.meta.elapsed)}</span>
+              <span>{formatDuration(props.message.meta?.elapsed ?? 0)}</span>
             </Show>
           </Show>
 

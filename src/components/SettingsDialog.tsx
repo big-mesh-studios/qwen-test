@@ -1,6 +1,7 @@
 import { createSignal, onSettled, Show, untrack } from "solid-js";
 import { Portal } from "@solidjs/web";
-import { formatBytes } from "../lib/utils.js";
+import type { Device, Settings } from "../lib/types";
+import { formatBytes } from "../lib/utils";
 import {
   IconAlert,
   IconClose,
@@ -8,21 +9,30 @@ import {
   IconSliders,
   IconTrash,
   IconZap,
-} from "./Icons.jsx";
+} from "./Icons";
 
-export function SettingsDialog(props) {
+interface SettingsDialogProps {
+  settings: Settings;
+  cacheBytes: number;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (settings: Settings) => void;
+  onClearCache: () => void;
+}
+
+export function SettingsDialog(props: SettingsDialogProps) {
   const initial = untrack(() => ({ ...props.settings }));
   const [systemPrompt, setSystemPrompt] = createSignal(initial.systemPrompt);
   const [temperature, setTemperature] = createSignal(initial.temperature);
   const [topP, setTopP] = createSignal(initial.topP);
   const [maxNewTokens, setMaxNewTokens] = createSignal(initial.maxNewTokens);
   const [repetitionPenalty, setRepetitionPenalty] = createSignal(initial.repetitionPenalty);
-  const [device, setDevice] = createSignal(initial.device);
+  const [device, setDevice] = createSignal<Device>(initial.device);
 
   const deviceChanged = () => device() !== props.settings.device;
 
   onSettled(() => {
-    const onKeyDown = (event) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") props.onClose();
     };
     window.addEventListener("keydown", onKeyDown);
@@ -162,7 +172,7 @@ export function SettingsDialog(props) {
                 <select
                   value={device()}
                   disabled={props.busy}
-                  onChange={(event) => setDevice(event.currentTarget.value)}
+                  onChange={(event) => setDevice(event.currentTarget.value as Device)}
                 >
                   <option value="wasm">WASM · CPU (recommended)</option>
                   <option value="webgpu">WebGPU · GPU (experimental)</option>

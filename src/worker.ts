@@ -3,6 +3,9 @@ import {
   pipeline,
   InterruptableStoppingCriteria,
   TextStreamer,
+  type Message,
+  type ProgressInfo,
+  type TextGenerationPipeline,
 } from "@huggingface/transformers";
 import {
   clearModelCache,
@@ -10,7 +13,14 @@ import {
   modelCache,
   setCacheErrorHandler,
   setCacheProgressHandler,
-} from "./lib/modelCache.js";
+} from "./lib/modelCache";
+import type {
+  Device,
+  Dtype,
+  GenerationOptions,
+  WorkerRequest,
+  WorkerResponse,
+} from "./lib/types";
 
 const MODEL_ID = "onnx-community/Qwen2.5-Coder-0.5B-Instruct";
 
@@ -20,17 +30,19 @@ env.useBrowserCache = false;
 env.useCustomCache = true;
 env.customCache = modelCache;
 
-let generator = null;
-let loadedKey = null;
-let loadToken = 0;
-let activeGeneration = null;
+const scope = self as unknown as DedicatedWorkerGlobalScope;
 
-function post(message) {
-  self.postMessage(message);
+let generator: TextGenerationPipeline | null = null;
+let loadedKey: string | null = null;
+let loadToken = 0;
+let activeGeneration: { id: string; criteria: InterruptableStoppingCriteria } | null = null;
+
+function post(message: WorkerResponse): void {
+  scope.postMessage(message);
 }
 
-function describeError(error) {
-  const message = error?.message ?? String(error ?? "Unknown error");
+function describeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
     return `Network error while contacting Hugging Face. Check your connection and try again. (${message})`;
   }
@@ -51,7 +63,7 @@ setCacheProgressHandler(({ phase, file, loaded, total }) => {
   post({ type: "caching", phase, file, loaded, total });
 });
 
-async function loadModel({ device = "wasm", dtype = "q4" } = {}) {
+async function loadModel({ device = "wasm", dtype = "q4" }: { device?: Device; dtype?: Dtype } = {}) {
   const key = `${device}:${dtype}`;
 
   if (generator && loadedKey === key) {
@@ -82,7 +94,7 @@ async function loadModel({ device = "wasm", dtype = "q4" } = {}) {
     const next = await pipeline("text-generation", MODEL_ID, {
       device,
       dtype,
-      progress_callback: (progress) => {
+      progress_callback: (progress: ProgressInfo) => {
         if (token !== loadToken) return;
 
         if (progress.status === "progress_total") {
@@ -129,7 +141,7 @@ async function loadModel({ device = "wasm", dtype = "q4" } = {}) {
     if (device === "webgpu") {
       post({
         type: "warning",
-        message: `WebGPU could not load Qwen (${error?.message ?? error}). Falling back to WASM.`,
+        message: `WebGPU could not load Qwen (${error instanceof Error ? error.message : String(error)}). Falling back to WASM.`,
       });
       return loadModel({ device: "wasm", dtype });
     }
@@ -138,7 +150,15 @@ async function loadModel({ device = "wasm", dtype = "q4" } = {}) {
   }
 }
 
-async function generate({ id, messages, options = {} }) {
+async function generate({
+  id,
+  messages,
+  options = {},
+}: {
+  id: string;
+  messages: Message[];
+  options?: GenerationOptions;
+}): Promise<void> {
   if (!generator) {
     post({
       type: "error",
@@ -168,7 +188,7 @@ async function generate({ id, messages, options = {} }) {
   const streamer = new TextStreamer(generator.tokenizer, {
     skip_prompt: true,
     skip_special_tokens: true,
-    callback_function: (text) => {
+    callback_function: (text: string) => {
       post({ type: "token", id, text });
     },
     token_callback_function: () => {
@@ -176,7 +196,7 @@ async function generate({ id, messages, options = {} }) {
     },
   });
 
-  const generationOptions = {
+  const generationOptions: Record<string, unknown> = {
     max_new_tokens: Math.max(1, Math.round(options.maxNewTokens ?? 512)),
     repetition_penalty: Number(options.repetitionPenalty) || 1.0,
     do_sample: Number(options.temperature) > 0,
@@ -191,11 +211,18 @@ async function generate({ id, messages, options = {} }) {
   }
 
   try {
-    const output = await generator(messages, generationOptions);
+    const output = await generator(
+      messages,
+      generationOptions as Parameters<typeof generator>[1],
+    );
     const generated = output?.[0]?.generated_text;
-    const text = Array.isArray(generated)
-      ? (generated.at(-1)?.content ?? "")
-      : String(generated ?? "");
+    let text = "";
+    if (Array.isArray(generated)) {
+      const last = generated.at(-1);
+      text = typeof last?.content === "string" ? last.content : "";
+    } else if (typeof generated === "string") {
+      text = generated;
+    }
 
     post({
       type: "done",
@@ -228,7 +255,7 @@ async function generate({ id, messages, options = {} }) {
   }
 }
 
-self.onmessage = async (event) => {
+scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
 
   switch (message.type) {
@@ -237,7 +264,11 @@ self.onmessage = async (event) => {
       break;
 
     case "generate":
-      await generate(message);
+      await generate({
+        id: message.id,
+        messages: message.messages as Message[],
+        options: message.options,
+      });
       break;
 
     case "abort":

@@ -13,24 +13,36 @@ import {
   idbPut,
   idbStats,
   isIndexedDBAvailable,
-} from "./idb.js";
+  type StoredModelFile,
+} from "./idb";
 
-let cacheErrorHandler = null;
-let cacheProgressHandler = null;
+export interface CacheProgress {
+  phase: "start" | "progress" | "done" | "saved";
+  file: string;
+  loaded: number;
+  total: number;
+}
 
-export function setCacheErrorHandler(handler) {
+type CacheErrorHandler = (message: string) => void;
+type CacheProgressHandler = (progress: CacheProgress) => void;
+type PutProgressCallback = (data: { progress: number; loaded: number; total: number }) => void;
+
+let cacheErrorHandler: CacheErrorHandler | null = null;
+let cacheProgressHandler: CacheProgressHandler | null = null;
+
+export function setCacheErrorHandler(handler: CacheErrorHandler | null): void {
   cacheErrorHandler = handler;
 }
 
-export function setCacheProgressHandler(handler) {
+export function setCacheProgressHandler(handler: CacheProgressHandler | null): void {
   cacheProgressHandler = handler;
 }
 
-export function cacheKey(request) {
+export function cacheKey(request: string | Request): string {
   return typeof request === "string" ? request : (request?.url ?? String(request));
 }
 
-function fileNameFromUrl(url) {
+function fileNameFromUrl(url: string): string {
   try {
     return decodeURIComponent(new URL(url).pathname.split("/").pop() || url);
   } catch {
@@ -38,7 +50,7 @@ function fileNameFromUrl(url) {
   }
 }
 
-async function readResponseBlob(response, key) {
+async function readResponseBlob(response: Response, key: string): Promise<Blob> {
   const total = Number(response.headers.get("content-length")) || 0;
   const file = fileNameFromUrl(key);
 
@@ -57,12 +69,12 @@ async function readResponseBlob(response, key) {
 }
 
 export const modelCache = {
-  async match(request) {
+  async match(request: string): Promise<Response | undefined> {
     if (!isIndexedDBAvailable()) return undefined;
 
     try {
       const key = cacheKey(request);
-      const record = await idbGet(MODEL_STORE, key);
+      const record = await idbGet<StoredModelFile>(MODEL_STORE, key);
       if (!record?.blob) return undefined;
 
       const headers = new Headers(record.headers ?? []);
@@ -73,22 +85,26 @@ export const modelCache = {
     }
   },
 
-  async put(request, response, progressCallback) {
+  async put(
+    request: string,
+    response: Response,
+    progressCallback?: PutProgressCallback,
+  ): Promise<void> {
     if (!isIndexedDBAvailable() || !response) return;
 
     const key = cacheKey(request);
 
     try {
-      const existing = await idbGet(MODEL_STORE, key);
+      const existing = await idbGet<StoredModelFile>(MODEL_STORE, key);
       if (existing?.blob) return;
 
       const blob = await readResponseBlob(response, key);
-      const headers = Array.from(response.headers.entries());
+      const headers: [string, string][] = Array.from(response.headers.entries());
       if (!headers.some(([name]) => name.toLowerCase() === "content-length")) {
         headers.push(["content-length", String(blob.size)]);
       }
 
-      await idbPut(MODEL_STORE, {
+      await idbPut<StoredModelFile>(MODEL_STORE, {
         url: key,
         blob,
         size: blob.size,
@@ -97,22 +113,26 @@ export const modelCache = {
         cachedAt: Date.now(),
       });
 
-      cacheProgressHandler?.({ phase: "saved", file: fileNameFromUrl(key), loaded: blob.size, total: blob.size });
+      cacheProgressHandler?.({
+        phase: "saved",
+        file: fileNameFromUrl(key),
+        loaded: blob.size,
+        total: blob.size,
+      });
       progressCallback?.({ progress: 100, loaded: blob.size, total: blob.size });
     } catch (error) {
       const message =
-        error?.name === "QuotaExceededError"
+        error instanceof DOMException && error.name === "QuotaExceededError"
           ? "The browser's storage quota was exceeded. The model will still run, but it could not be saved for next time."
-          : `Could not save the model to IndexedDB: ${error?.message ?? error}`;
+          : `Could not save the model to IndexedDB: ${error instanceof Error ? error.message : String(error)}`;
       cacheErrorHandler?.(message);
     }
   },
 
-  async delete(request) {
-    if (!isIndexedDBAvailable()) return false;
+  async delete(request: string): Promise<boolean> {
     const key = cacheKey(request);
     try {
-      await idbDeleteWhere(MODEL_STORE, (record) => record.url === key);
+      await idbDeleteWhere<StoredModelFile>(MODEL_STORE, (record) => record.url === key);
       return true;
     } catch {
       return false;
@@ -120,9 +140,12 @@ export const modelCache = {
   },
 };
 
-export async function getModelCacheStats(modelId = null) {
+export async function getModelCacheStats(modelId: string | null = null): Promise<{
+  bytes: number;
+  files: number;
+}> {
   try {
-    return await idbStats(MODEL_STORE, (record) =>
+    return await idbStats<StoredModelFile>(MODEL_STORE, (record) =>
       modelId ? String(record.url).includes(modelId) : true,
     );
   } catch {
@@ -130,9 +153,9 @@ export async function getModelCacheStats(modelId = null) {
   }
 }
 
-export async function clearModelCache(modelId = null) {
+export async function clearModelCache(modelId: string | null = null): Promise<boolean> {
   try {
-    await idbDeleteWhere(MODEL_STORE, (record) =>
+    await idbDeleteWhere<StoredModelFile>(MODEL_STORE, (record) =>
       modelId ? String(record.url).includes(modelId) : true,
     );
     return true;

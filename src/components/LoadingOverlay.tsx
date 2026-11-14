@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
-import { formatBytes, formatDuration } from "../lib/utils.js";
+import type { Stage } from "../lib/types";
+import { formatBytes, formatDuration } from "../lib/utils";
 import {
   IconAlert,
   IconDatabase,
@@ -7,9 +8,21 @@ import {
   IconRefresh,
   IconShield,
   IconZap,
-} from "./Icons.jsx";
+} from "./Icons";
 
-export function LoadingOverlay(props) {
+interface LoadingOverlayProps {
+  open: boolean;
+  error: string | null;
+  stage: Stage;
+  percent: number | null;
+  loaded: number;
+  total: number;
+  speed: number;
+  cachedBytes: number;
+  onRetry: () => void;
+}
+
+export function LoadingOverlay(props: LoadingOverlayProps) {
   const stageLabel = () => {
     switch (props.stage) {
       case "cache-check":
@@ -38,7 +51,7 @@ export function LoadingOverlay(props) {
   return (
     <div
       class={["overlay", { "overlay--hidden": !props.open }]}
-      aria-hidden={!props.open}
+      aria-hidden={props.open ? "false" : "true"}
     >
       <div class="overlay-card">
         <div class="overlay-mark" aria-hidden="true">
@@ -85,14 +98,19 @@ export function LoadingOverlay(props) {
             <div
               class={[
                 "progress-bar",
-                { "progress-bar--indeterminate": props.percent == null || props.stage === "initializing" },
+                {
+                  "progress-bar--indeterminate":
+                    props.percent == null || props.stage === "initializing",
+                },
               ]}
               style={{ width: `${percent() || 2}%` }}
             />
           </div>
 
           <div class="progress-numbers">
-            <span class="progress-percent">{props.percent == null ? "…" : `${Math.round(percent())}%`}</span>
+            <span class="progress-percent">
+              {props.percent == null ? "…" : `${Math.round(percent())}%`}
+            </span>
             <span class="progress-bytes">
               <Show when={props.total} fallback={<span>Reading cached files</span>}>
                 {formatBytes(props.loaded)} / {formatBytes(props.total)}

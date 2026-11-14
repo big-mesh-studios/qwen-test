@@ -5,11 +5,11 @@ import {
   onSettled,
   Show,
 } from "solid-js";
-import { ChatView } from "./components/ChatView.jsx";
-import { Composer } from "./components/Composer.jsx";
-import { LoadingOverlay } from "./components/LoadingOverlay.jsx";
-import { SettingsDialog } from "./components/SettingsDialog.jsx";
-import { Sidebar } from "./components/Sidebar.jsx";
+import { ChatView } from "./components/ChatView";
+import { Composer } from "./components/Composer";
+import { LoadingOverlay } from "./components/LoadingOverlay";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { Sidebar } from "./components/Sidebar";
 import {
   IconAlert,
   IconDatabase,
@@ -17,7 +17,7 @@ import {
   IconMoon,
   IconSliders,
   IconSun,
-} from "./components/Icons.jsx";
+} from "./components/Icons";
 import {
   createConversation,
   deleteConversationRecord,
@@ -27,38 +27,79 @@ import {
   persistSettings,
   persistTheme,
   saveConversation,
-} from "./lib/storage.js";
-import { formatBytes, makeTitle, uid } from "./lib/utils.js";
+} from "./lib/storage";
+import { formatBytes, makeTitle, uid } from "./lib/utils";
+import type {
+  ChatMessage,
+  ChatRequestMessage,
+  Conversation,
+  ModelStatus,
+  Settings,
+  Stage,
+  Theme,
+  WorkerRequest,
+  WorkerResponse,
+} from "./lib/types";
 
 const MODEL_NAME = "Qwen2.5-Coder-0.5B";
 
+type ToastTone = "info" | "warning" | "error";
+
+interface Toast {
+  id: string;
+  message: string;
+  tone: ToastTone;
+}
+
+interface Progress {
+  percent: number | null;
+  loaded: number;
+  total: number;
+}
+
+interface StreamState {
+  conversationId: string;
+  messageId: string;
+  text: string;
+}
+
+interface SpeedSample {
+  loaded: number;
+  at: number;
+  speed: number;
+}
+
 export default function App() {
-  const [theme, setTheme] = createSignal(loadTheme());
-  const [settings, setSettings] = createSignal(loadSettings());
-  const [conversations, setConversations] = createSignal([]);
-  const [activeId, setActiveId] = createSignal(null);
+  const [theme, setTheme] = createSignal<Theme>(loadTheme());
+  const [settings, setSettings] = createSignal<Settings>(loadSettings());
+  const [conversations, setConversations] = createSignal<Conversation[]>([]);
+  const [activeId, setActiveId] = createSignal<string | null>(null);
   const [draft, setDraft] = createSignal("");
 
-  const [modelStatus, setModelStatus] = createSignal("idle");
-  const [loadError, setLoadError] = createSignal(null);
-  const [stage, setStage] = createSignal("cache-check");
-  const [progress, setProgress] = createSignal({ percent: null, loaded: 0, total: 0 });
+  const [modelStatus, setModelStatus] = createSignal<ModelStatus>("idle");
+  const [loadError, setLoadError] = createSignal<string | null>(null);
+  const [stage, setStage] = createSignal<Stage>("cache-check");
+  const [progress, setProgress] = createSignal<Progress>({
+    percent: null,
+    loaded: 0,
+    total: 0,
+  });
   const [speed, setSpeed] = createSignal(0);
   const [cacheBytes, setCacheBytes] = createSignal(0);
-  const [cacheWarning, setCacheWarning] = createSignal(null);
+  const [cacheWarning, setCacheWarning] = createSignal<string | null>(null);
 
   const [generating, setGenerating] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
   const [sidebarOpen, setSidebarOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [toast, setToast] = createSignal(null);
+  const [toast, setToast] = createSignal<Toast | null>(null);
 
-  let worker = null;
-  let streamState = null;
-  let speedSample = { loaded: 0, at: 0, speed: 0 };
-  let toastTimer;
+  let worker: Worker | null = null;
+  let streamState: StreamState | null = null;
+  let speedSample: SpeedSample = { loaded: 0, at: 0, speed: 0 };
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const activeConversation = createMemo(() => {
+  const activeConversation = createMemo<Conversation | null>(() => {
     const list = conversations();
     if (!list.length) return null;
     return list.find((conversation) => conversation.id === activeId()) ?? list[0];
@@ -90,7 +131,7 @@ export default function App() {
   );
 
   onSettled(() => {
-    worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = handleWorkerMessage;
     worker.onerror = (event) => {
       const message = event.message || "The model worker crashed.";
@@ -102,9 +143,9 @@ export default function App() {
     };
 
     loadModel(settings().device, settings().dtype);
-    hydrateConversations();
+    void hydrateConversations();
 
-    const onGlobalKeyDown = (event) => {
+    const onGlobalKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         newChat();
@@ -121,7 +162,7 @@ export default function App() {
     };
   });
 
-  async function hydrateConversations() {
+  async function hydrateConversations(): Promise<void> {
     const stored = await loadConversations();
     if (conversations().length > 0) return; // The user already started a chat.
 
@@ -135,13 +176,16 @@ export default function App() {
     }
   }
 
-  function showToast(message, tone = "info") {
+  function showToast(message: string, tone: ToastTone = "info"): void {
     setToast({ message, tone, id: uid("toast") });
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => setToast(null), 6000);
   }
 
-  function loadModel(device = settings().device, dtype = settings().dtype) {
+  function loadModel(
+    device: Settings["device"] = settings().device,
+    dtype: Settings["dtype"] = settings().dtype,
+  ): void {
     if (!worker) return;
     setModelStatus("loading");
     setLoadError(null);
@@ -149,10 +193,11 @@ export default function App() {
     setProgress({ percent: null, loaded: 0, total: 0 });
     setSpeed(0);
     speedSample = { loaded: 0, at: performance.now(), speed: 0 };
-    worker.postMessage({ type: "load", device, dtype });
+    const request: WorkerRequest = { type: "load", device, dtype };
+    worker.postMessage(request);
   }
 
-  function handleWorkerMessage(event) {
+  function handleWorkerMessage(event: MessageEvent<WorkerResponse>): void {
     const message = event.data;
 
     switch (message.type) {
@@ -337,14 +382,14 @@ export default function App() {
     }
   }
 
-  function schedulePersist(conversationId) {
+  function schedulePersist(conversationId: string): void {
     setTimeout(() => {
       const conversation = conversations().find((item) => item.id === conversationId);
-      if (conversation) saveConversation(conversation);
+      if (conversation) void saveConversation(conversation);
     }, 0);
   }
 
-  function sendMessage() {
+  function sendMessage(): void {
     if (!canSend() || !worker) return;
 
     const conversation = activeConversation();
@@ -353,14 +398,14 @@ export default function App() {
     const text = draft().trim();
     if (!text) return;
 
-    const userMessage = {
+    const userMessage: ChatMessage = {
       id: uid("msg"),
       role: "user",
       content: text,
       createdAt: Date.now(),
     };
 
-    const assistantMessage = {
+    const assistantMessage: ChatMessage = {
       id: uid("msg"),
       role: "assistant",
       content: "",
@@ -368,7 +413,7 @@ export default function App() {
       streaming: true,
     };
 
-    const history = conversation.messages
+    const history: ChatRequestMessage[] = conversation.messages
       .filter(
         (item) =>
           !item.streaming &&
@@ -377,11 +422,11 @@ export default function App() {
       )
       .map((item) => ({ role: item.role, content: item.content }));
 
-    const requestMessages = [...history, { role: "user", content: text }];
+    const requestMessages: ChatRequestMessage[] = [...history, { role: "user", content: text }];
     const systemPrompt = settings().systemPrompt?.trim();
     if (systemPrompt) requestMessages.unshift({ role: "system", content: systemPrompt });
 
-    const updated = {
+    const updated: Conversation = {
       ...conversation,
       title:
         conversation.messages.length === 0 ? makeTitle(text) : conversation.title,
@@ -402,9 +447,9 @@ export default function App() {
       text: "",
     };
 
-    saveConversation(updated);
+    void saveConversation(updated);
 
-    worker.postMessage({
+    const request: WorkerRequest = {
       type: "generate",
       id: assistantMessage.id,
       messages: requestMessages,
@@ -414,16 +459,18 @@ export default function App() {
         topP: settings().topP,
         repetitionPenalty: settings().repetitionPenalty,
       },
-    });
+    };
+    worker.postMessage(request);
   }
 
-  function stopGeneration() {
+  function stopGeneration(): void {
     if (!worker || !generating() || stopping()) return;
     setStopping(true);
-    worker.postMessage({ type: "abort" });
+    const request: WorkerRequest = { type: "abort" };
+    worker.postMessage(request);
   }
 
-  function newChat() {
+  function newChat(): void {
     const conversation = createConversation();
     setConversations((list) => [conversation, ...list]);
     setActiveId(conversation.id);
@@ -431,15 +478,16 @@ export default function App() {
     setSidebarOpen(false);
   }
 
-  function selectConversation(id) {
+  function selectConversation(id: string): void {
     setActiveId(id);
     setDraft("");
     setSidebarOpen(false);
   }
 
-  async function removeConversation(id) {
+  async function removeConversation(id: string): Promise<void> {
     if (streamState?.conversationId === id) {
-      worker?.postMessage({ type: "abort" });
+      const request: WorkerRequest = { type: "abort" };
+      worker?.postMessage(request);
       streamState = null;
       setGenerating(false);
       setStopping(false);
@@ -459,7 +507,7 @@ export default function App() {
     await deleteConversationRecord(id);
   }
 
-  function saveSettings(next) {
+  function saveSettings(next: Settings): void {
     const previous = settings();
     setSettings(next);
     persistSettings(next);
@@ -474,7 +522,7 @@ export default function App() {
     }
   }
 
-  function clearCache() {
+  function clearCache(): void {
     if (modelStatus() === "loading") {
       showToast("Wait for the model to finish loading before clearing the cache.", "warning");
       return;
@@ -484,14 +532,15 @@ export default function App() {
       "Delete the cached model files from IndexedDB?\n\nThe chat keeps working until you reload. Next time, the ~862 MB model will download again.",
     );
     if (!confirmed) return;
-    worker?.postMessage({ type: "clear-cache" });
+    const request: WorkerRequest = { type: "clear-cache" };
+    worker?.postMessage(request);
   }
 
-  function pickPrompt(prompt) {
+  function pickPrompt(prompt: string): void {
     if (modelStatus() !== "ready") return;
     setDraft(prompt);
     requestAnimationFrame(() => {
-      document.querySelector(".composer-input")?.focus();
+      document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
     });
   }
 
@@ -509,7 +558,7 @@ export default function App() {
         progressTotal={progress().total}
         onNewChat={newChat}
         onSelect={selectConversation}
-        onDelete={removeConversation}
+        onDelete={(id) => void removeConversation(id)}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearCache={clearCache}
         onRetry={() => loadModel(settings().device, settings().dtype)}
@@ -617,11 +666,11 @@ export default function App() {
       />
 
       <Show when={toast()}>
-        <div class={["toast", `toast--${toast().tone}`]} role="status">
-          <Show when={toast().tone === "warning" || toast().tone === "error"}>
+        <div class={["toast", `toast--${toast()!.tone}`]} role="status">
+          <Show when={toast()!.tone === "warning" || toast()!.tone === "error"}>
             <IconAlert size={15} />
           </Show>
-          <span>{toast().message}</span>
+          <span>{toast()!.message}</span>
         </div>
       </Show>
     </div>

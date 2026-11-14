@@ -1,4 +1,6 @@
 import { For, Show } from "solid-js";
+import type { Conversation, ModelStatus } from "../lib/types";
+import { formatBytes, previewText, relativeTime } from "../lib/utils";
 import {
   IconAlert,
   IconCpu,
@@ -8,10 +10,16 @@ import {
   IconShield,
   IconSliders,
   IconTrash,
-} from "./Icons.jsx";
-import { formatBytes, previewText, relativeTime } from "../lib/utils.js";
+} from "./Icons";
 
-function ConversationItem(props) {
+interface ConversationItemProps {
+  conversation: Conversation;
+  active: boolean;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}
+
+function ConversationItem(props: ConversationItemProps) {
   return (
     <div
       class={["chat-item", { "chat-item--active": props.active }]}
@@ -27,7 +35,9 @@ function ConversationItem(props) {
     >
       <div class="chat-item-main">
         <div class="chat-item-title">{props.conversation.title}</div>
-        <div class="chat-item-preview">{previewText(props.conversation.messages.at(-1)?.content)}</div>
+        <div class="chat-item-preview">
+          {previewText(props.conversation.messages.at(-1)?.content)}
+        </div>
       </div>
       <span class="chat-item-time">{relativeTime(props.conversation.updatedAt)}</span>
       <button
@@ -46,7 +56,25 @@ function ConversationItem(props) {
   );
 }
 
-export function Sidebar(props) {
+interface SidebarProps {
+  conversations: Conversation[];
+  activeId: string | null;
+  open: boolean;
+  modelStatus: ModelStatus;
+  cacheBytes: number;
+  cacheWarning: string | null;
+  progressPercent: number | null;
+  progressLoaded: number;
+  progressTotal: number;
+  onNewChat: () => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  onOpenSettings: () => void;
+  onClearCache: () => void;
+  onRetry: () => void;
+}
+
+export function Sidebar(props: SidebarProps) {
   const statusLabel = () => {
     switch (props.modelStatus) {
       case "ready":
@@ -141,7 +169,10 @@ export function Sidebar(props) {
           <Show when={props.modelStatus === "loading"}>
             <div class="mini-progress">
               <div
-                class={["mini-progress-bar", { "mini-progress-bar--indeterminate": !props.progressPercent }]}
+                class={[
+                  "mini-progress-bar",
+                  { "mini-progress-bar--indeterminate": !props.progressPercent },
+                ]}
                 style={{ width: `${Math.max(4, props.progressPercent || 0)}%` }}
               />
             </div>

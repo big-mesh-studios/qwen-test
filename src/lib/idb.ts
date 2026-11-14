@@ -6,15 +6,34 @@
  *   conversations – chat sessions, keyed by id
  */
 
+import type { ChatMessage } from "./types";
+
 const DB_NAME = "qwen-coder-chat";
 const DB_VERSION = 1;
 
 export const MODEL_STORE = "model-files";
 export const CHAT_STORE = "conversations";
 
-let dbPromise = null;
+export interface StoredModelFile {
+  url: string;
+  blob: Blob;
+  size: number;
+  type: string;
+  headers: [string, string][];
+  cachedAt: number;
+}
 
-export function isIndexedDBAvailable() {
+export interface StoredConversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+export function isIndexedDBAvailable(): boolean {
   try {
     return typeof indexedDB !== "undefined";
   } catch {
@@ -22,10 +41,10 @@ export function isIndexedDBAvailable() {
   }
 }
 
-export function openDB() {
+export function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise((resolve, reject) => {
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (!isIndexedDBAvailable()) {
       reject(new Error("IndexedDB is not available in this browser."));
       return;
@@ -67,24 +86,28 @@ export function openDB() {
   return dbPromise;
 }
 
-function requestResult(request) {
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function idbGet(storeName, key) {
+export async function idbGet<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
   const db = await openDB();
-  return requestResult(db.transaction(storeName, "readonly").objectStore(storeName).get(key));
+  return requestResult<T | undefined>(
+    db.transaction(storeName, "readonly").objectStore(storeName).get(key),
+  );
 }
 
-export async function idbGetAll(storeName) {
+export async function idbGetAll<T>(storeName: string): Promise<T[]> {
   const db = await openDB();
-  return requestResult(db.transaction(storeName, "readonly").objectStore(storeName).getAll());
+  return requestResult<T[]>(
+    db.transaction(storeName, "readonly").objectStore(storeName).getAll(),
+  );
 }
 
-export async function idbPut(storeName, value) {
+export async function idbPut<T>(storeName: string, value: T): Promise<T> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
@@ -95,7 +118,7 @@ export async function idbPut(storeName, value) {
   });
 }
 
-export async function idbDelete(storeName, key) {
+export async function idbDelete(storeName: string, key: IDBValidKey): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
@@ -106,7 +129,7 @@ export async function idbDelete(storeName, key) {
   });
 }
 
-export async function idbClear(storeName) {
+export async function idbClear(storeName: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
@@ -121,7 +144,7 @@ export async function idbClear(storeName) {
  * Walk every record in a store without loading blobs into memory.
  * `visit` receives the record; the cursor is advanced automatically.
  */
-export async function idbForEach(storeName, visit) {
+export async function idbForEach<T>(storeName: string, visit: (record: T) => void): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readonly");
@@ -131,7 +154,7 @@ export async function idbForEach(storeName, visit) {
       const cursor = request.result;
       if (!cursor) return;
       try {
-        visit(cursor.value);
+        visit(cursor.value as T);
       } catch (error) {
         reject(error);
         return;
@@ -149,7 +172,10 @@ export async function idbForEach(storeName, visit) {
 /**
  * Delete every record matching a predicate.
  */
-export async function idbDeleteWhere(storeName, predicate) {
+export async function idbDeleteWhere<T>(
+  storeName: string,
+  predicate: (record: T) => boolean,
+): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
@@ -158,7 +184,7 @@ export async function idbDeleteWhere(storeName, predicate) {
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) return;
-      if (predicate(cursor.value)) cursor.delete();
+      if (predicate(cursor.value as T)) cursor.delete();
       cursor.continue();
     };
 
@@ -173,11 +199,14 @@ export async function idbDeleteWhere(storeName, predicate) {
  * Size and file count for a store, optionally filtered.
  * Uses the stored byte size, never reading the blob itself.
  */
-export async function idbStats(storeName, predicate = () => true) {
+export async function idbStats<T extends { size?: number; blob?: Blob }>(
+  storeName: string,
+  predicate: (record: T) => boolean = () => true,
+): Promise<{ bytes: number; files: number }> {
   let bytes = 0;
   let files = 0;
 
-  await idbForEach(storeName, (record) => {
+  await idbForEach<T>(storeName, (record) => {
     if (!predicate(record)) return;
     files += 1;
     bytes += record.size ?? record.blob?.size ?? 0;

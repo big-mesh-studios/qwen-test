@@ -1,19 +1,31 @@
 import { createEffect, Show } from "solid-js";
-import { IconSend, IconShield, IconStop } from "./Icons.jsx";
+import type { ModelStatus } from "../lib/types";
+import { IconSend, IconShield, IconStop } from "./Icons";
 
-export function Composer(props) {
-  let textarea;
+interface ComposerProps {
+  value: string;
+  modelStatus: ModelStatus;
+  generating: boolean;
+  stopping: boolean;
+  canSend: boolean;
+  onInput: (value: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+}
+
+export function Composer(props: ComposerProps) {
+  let textarea: HTMLTextAreaElement | undefined;
 
   createEffect(
     () => props.value,
-    (value) => {
+    () => {
       if (!textarea) return;
       textarea.style.height = "0px";
       textarea.style.height = `${Math.min(200, Math.max(24, textarea.scrollHeight))}px`;
     },
   );
 
-  const onKeyDown = (event) => {
+  const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       if (props.canSend) props.onSend();

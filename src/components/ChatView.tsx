@@ -1,14 +1,30 @@
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, For, Show, type Component } from "solid-js";
 import { Dynamic } from "@solidjs/web";
-import { ChatMessage } from "./ChatMessage.jsx";
-import { IconBook, IconBug, IconCode, IconDatabase, IconSparkles } from "./Icons.jsx";
+import type { ChatMessage as ChatMessageModel } from "../lib/types";
+import { ChatMessage } from "./ChatMessage";
+import {
+  IconBook,
+  IconBug,
+  IconCode,
+  IconDatabase,
+  IconSparkles,
+  type IconProps,
+} from "./Icons";
 
-const SUGGESTIONS = [
+interface Suggestion {
+  icon: Component<IconProps>;
+  title: string;
+  description: string;
+  prompt: string;
+}
+
+const SUGGESTIONS: Suggestion[] = [
   {
     icon: IconCode,
     title: "Build a debounce hook",
     description: "A typed, reusable React hook with cleanup.",
-    prompt: "Write a reusable TypeScript React hook that debounces a value. Explain how the cleanup works.",
+    prompt:
+      "Write a reusable TypeScript React hook that debounces a value. Explain how the cleanup works.",
   },
   {
     icon: IconBook,
@@ -33,8 +49,13 @@ const SUGGESTIONS = [
   },
 ];
 
-export function ChatView(props) {
-  let scroller;
+interface ChatViewProps {
+  messages: ChatMessageModel[];
+  onPick: (prompt: string) => void;
+}
+
+export function ChatView(props: ChatViewProps) {
+  let scroller: HTMLDivElement | undefined;
   let pinned = true;
   let lastLength = 0;
 
@@ -50,6 +71,9 @@ export function ChatView(props) {
       streaming: !!props.messages.at(-1)?.streaming,
     }),
     (value) => {
+      // Read `tail`/`streaming` so the effect tracks token updates too.
+      void value.tail;
+      void value.streaming;
       if (value.length !== lastLength) {
         lastLength = value.length;
         pinned = true;
@@ -79,7 +103,7 @@ export function ChatView(props) {
   );
 }
 
-function EmptyState(props) {
+function EmptyState(props: { onPick: (prompt: string) => void }) {
   return (
     <section class="empty-state">
       <div class="hero-mark" aria-hidden="true">

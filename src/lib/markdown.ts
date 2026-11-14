@@ -5,7 +5,27 @@ const QUOTE_RE = /^\s*>\s?/;
 const UL_RE = /^\s*[-*+]\s+(.*)$/;
 const OL_RE = /^\s*\d+[.)]\s+(.*)$/;
 
-function isBlockStart(line) {
+export type InlineType = "text" | "code" | "link" | "strong" | "em";
+
+export interface InlineNode {
+  type: InlineType;
+  text: string;
+  href?: string;
+}
+
+export type BlockType = "code" | "heading" | "list" | "quote" | "hr" | "paragraph";
+
+export interface MarkdownBlock {
+  type: BlockType;
+  text?: string;
+  level?: number;
+  ordered?: boolean;
+  items?: string[];
+  lang?: string;
+  code?: string;
+}
+
+function isBlockStart(line: string): boolean {
   return (
     FENCE_RE.test(line) ||
     HEADING_RE.test(line) ||
@@ -21,11 +41,11 @@ function isBlockStart(line) {
  * constructs a coding assistant actually produces: fenced code, headings,
  * lists, quotes, rules and paragraphs.
  */
-export function parseMarkdown(source) {
+export function parseMarkdown(source: string): MarkdownBlock[] {
   const lines = String(source ?? "")
     .replace(/\r\n?/g, "\n")
     .split("\n");
-  const blocks = [];
+  const blocks: MarkdownBlock[] = [];
   let i = 0;
 
   while (i < lines.length) {
@@ -41,7 +61,7 @@ export function parseMarkdown(source) {
       const marker = fence[1][0];
       const minLength = fence[1].length;
       const lang = fence[2] || "";
-      const code = [];
+      const code: string[] = [];
       i += 1;
 
       while (i < lines.length) {
@@ -76,7 +96,7 @@ export function parseMarkdown(source) {
     }
 
     if (QUOTE_RE.test(line)) {
-      const quote = [];
+      const quote: string[] = [];
       while (i < lines.length && QUOTE_RE.test(lines[i])) {
         quote.push(lines[i].replace(QUOTE_RE, ""));
         i += 1;
@@ -87,7 +107,7 @@ export function parseMarkdown(source) {
 
     const unordered = line.match(UL_RE);
     if (unordered) {
-      const items = [];
+      const items: string[] = [];
       while (i < lines.length) {
         const item = lines[i].match(UL_RE);
         if (!item) break;
@@ -109,7 +129,7 @@ export function parseMarkdown(source) {
 
     const ordered = line.match(OL_RE);
     if (ordered) {
-      const items = [];
+      const items: string[] = [];
       while (i < lines.length) {
         const item = lines[i].match(OL_RE);
         if (!item) break;
@@ -129,7 +149,7 @@ export function parseMarkdown(source) {
       continue;
     }
 
-    const paragraph = [];
+    const paragraph: string[] = [];
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
       paragraph.push(lines[i]);
       i += 1;
@@ -148,14 +168,15 @@ export function parseMarkdown(source) {
 
 const INLINE_RE = /`([^`\n]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*/g;
 
-export function parseInline(source) {
+export function parseInline(source: string): InlineNode[] {
   const text = String(source ?? "");
-  const nodes = [];
+  const nodes: InlineNode[] = [];
   let lastIndex = 0;
 
   for (const match of text.matchAll(INLINE_RE)) {
-    if (match.index > lastIndex) {
-      nodes.push({ type: "text", text: text.slice(lastIndex, match.index) });
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      nodes.push({ type: "text", text: text.slice(lastIndex, index) });
     }
 
     if (match[1] !== undefined) {
@@ -168,7 +189,7 @@ export function parseInline(source) {
       nodes.push({ type: "em", text: match[5] });
     }
 
-    lastIndex = match.index + match[0].length;
+    lastIndex = index + match[0].length;
   }
 
   if (lastIndex < text.length) {

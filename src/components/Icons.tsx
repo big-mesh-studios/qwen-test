@@ -1,4 +1,16 @@
-function Svg(props) {
+import type { JSX } from "@solidjs/web";
+
+export interface IconProps {
+  size?: number;
+  class?: string;
+}
+
+interface SvgProps extends IconProps {
+  strokeWidth?: number;
+  children?: JSX.Element;
+}
+
+function Svg(props: SvgProps) {
   return (
     <svg
       width={props.size ?? 18}
@@ -17,7 +29,7 @@ function Svg(props) {
   );
 }
 
-export function IconPlus(props) {
+export function IconPlus(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M12 5v14" />
@@ -26,7 +38,7 @@ export function IconPlus(props) {
   );
 }
 
-export function IconTrash(props) {
+export function IconTrash(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M3 6h18" />
@@ -38,7 +50,7 @@ export function IconTrash(props) {
   );
 }
 
-export function IconSliders(props) {
+export function IconSliders(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M4 7h16" />
@@ -51,7 +63,7 @@ export function IconSliders(props) {
   );
 }
 
-export function IconSun(props) {
+export function IconSun(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <circle cx="12" cy="12" r="4" />
@@ -67,7 +79,7 @@ export function IconSun(props) {
   );
 }
 
-export function IconMoon(props) {
+export function IconMoon(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
@@ -75,7 +87,7 @@ export function IconMoon(props) {
   );
 }
 
-export function IconSend(props) {
+export function IconSend(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M22 2L11 13" />
@@ -84,7 +96,7 @@ export function IconSend(props) {
   );
 }
 
-export function IconStop(props) {
+export function IconStop(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
@@ -92,7 +104,7 @@ export function IconStop(props) {
   );
 }
 
-export function IconCopy(props) {
+export function IconCopy(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <rect x="9" y="9" width="12" height="12" rx="2" />
@@ -101,7 +113,7 @@ export function IconCopy(props) {
   );
 }
 
-export function IconCheck(props) {
+export function IconCheck(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M20 6L9 17l-5-5" />
@@ -109,7 +121,7 @@ export function IconCheck(props) {
   );
 }
 
-export function IconMenu(props) {
+export function IconMenu(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M4 6h16" />
@@ -119,7 +131,7 @@ export function IconMenu(props) {
   );
 }
 
-export function IconClose(props) {
+export function IconClose(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M18 6L6 18" />
@@ -128,7 +140,7 @@ export function IconClose(props) {
   );
 }
 
-export function IconChevronDown(props) {
+export function IconChevronDown(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M6 9l6 6 6-6" />
@@ -136,7 +148,7 @@ export function IconChevronDown(props) {
   );
 }
 
-export function IconSparkles(props) {
+export function IconSparkles(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z" />
@@ -146,7 +158,7 @@ export function IconSparkles(props) {
   );
 }
 
-export function IconCode(props) {
+export function IconCode(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M16 18l6-6-6-6" />
@@ -155,7 +167,7 @@ export function IconCode(props) {
   );
 }
 
-export function IconBug(props) {
+export function IconBug(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <rect x="7" y="7" width="10" height="13" rx="5" />
@@ -170,7 +182,7 @@ export function IconBug(props) {
   );
 }
 
-export function IconDatabase(props) {
+export function IconDatabase(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <ellipse cx="12" cy="5" rx="8" ry="3" />
@@ -180,7 +192,7 @@ export function IconDatabase(props) {
   );
 }
 
-export function IconCpu(props) {
+export function IconCpu(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <rect x="5" y="5" width="14" height="14" rx="2" />
@@ -197,7 +209,7 @@ export function IconCpu(props) {
   );
 }
 
-export function IconDownload(props) {
+export function IconDownload(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M12 3v12" />
@@ -207,7 +219,7 @@ export function IconDownload(props) {
   );
 }
 
-export function IconRefresh(props) {
+export function IconRefresh(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
@@ -216,7 +228,7 @@ export function IconRefresh(props) {
   );
 }
 
-export function IconShield(props) {
+export function IconShield(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -225,7 +237,7 @@ export function IconShield(props) {
   );
 }
 
-export function IconMessage(props) {
+export function IconMessage(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
@@ -235,7 +247,7 @@ export function IconMessage(props) {
   );
 }
 
-export function IconAlert(props) {
+export function IconAlert(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
@@ -245,7 +257,7 @@ export function IconAlert(props) {
   );
 }
 
-export function IconZap(props) {
+export function IconZap(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M13 2L3 14h8l-1 8 10-12h-8z" />
@@ -253,7 +265,7 @@ export function IconZap(props) {
   );
 }
 
-export function IconBook(props) {
+export function IconBook(props: IconProps) {
   return (
     <Svg size={props.size} class={props.class}>
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
