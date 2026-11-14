@@ -47,7 +47,6 @@ export function SettingsDialog(props: SettingsDialogProps) {
       maxNewTokens: Math.round(Number(maxNewTokens())),
       repetitionPenalty: Number(repetitionPenalty()),
       device: device(),
-      dtype: "q4",
     });
   };
 
@@ -180,22 +179,30 @@ export function SettingsDialog(props: SettingsDialogProps) {
                 <span class="field-hint">
                   {props.busy
                     ? "Stop the current response before switching the backend."
-                    : "Changing the backend reloads the model. The q4 weights are reused from cache."}
+                    : "Changing the backend reloads the model. The quantized weights are reused from the local cache."}
                 </span>
               </label>
 
               <div class="settings-kv">
                 <span>
                   <IconZap size={14} />
+                  Runtime
+                </span>
+                <strong>wllama · llama.cpp</strong>
+              </div>
+
+              <div class="settings-kv">
+                <span>
+                  <IconZap size={14} />
                   Precision
                 </span>
-                <strong>Q4 · 4-bit quantized</strong>
+                <strong>Q4_K_M · GGUF</strong>
               </div>
 
               <div class="settings-kv">
                 <span>
                   <IconDatabase size={14} />
-                  Model files in IndexedDB
+                  Model file in browser storage
                 </span>
                 <strong>{formatBytes(props.cacheBytes)}</strong>
               </div>

@@ -112,7 +112,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
 
       <p class="eyebrow">
         <span class="eyebrow-dot" />
-        Qwen2.5-Coder · 0.5B · q4 · local
+        Qwen2.5-Coder · 0.5B · Q4_K_M · local
       </p>
 
       <h1>
@@ -145,8 +145,8 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
       </div>
 
       <p class="hero-foot">
-        First run downloads the model (~862 MB). It is cached in IndexedDB for instant offline
-        starts next time.
+        First run downloads the GGUF model (~398 MB). It is cached in the browser's private file
+        storage (OPFS) so later startups do not download it again.
       </p>
     </section>
   );

@@ -38,7 +38,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Verify the folder-scoped service worker and model worker are emitted
+      - name: Verify the folder-scoped service worker and model runtime are emitted
         run: |
           test -f dist/coi-serviceworker.js
+          test -f dist/wllama.wasm
           test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"

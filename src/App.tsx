@@ -86,7 +86,6 @@ export default function App() {
   });
   const [speed, setSpeed] = createSignal(0);
   const [cacheBytes, setCacheBytes] = createSignal(0);
-  const [cacheWarning, setCacheWarning] = createSignal<string | null>(null);
 
   const [generating, setGenerating] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
@@ -116,7 +115,7 @@ export default function App() {
   );
 
   const headerSubtitle = () => {
-    if (modelStatus() === "ready") return `${MODEL_NAME} · q4 · local`;
+    if (modelStatus() === "ready") return `${MODEL_NAME} · Q4_K_M · local`;
     if (modelStatus() === "loading") return "Loading the model…";
     if (modelStatus() === "error") return "Model unavailable";
     return "Starting up…";
@@ -142,7 +141,7 @@ export default function App() {
       setStopping(false);
     };
 
-    loadModel(settings().device, settings().dtype);
+    loadModel(settings().device);
     void hydrateConversations();
 
     const onGlobalKeyDown = (event: KeyboardEvent) => {
@@ -182,10 +181,7 @@ export default function App() {
     toastTimer = setTimeout(() => setToast(null), 6000);
   }
 
-  function loadModel(
-    device: Settings["device"] = settings().device,
-    dtype: Settings["dtype"] = settings().dtype,
-  ): void {
+  function loadModel(device: Settings["device"] = settings().device): void {
     if (!worker) return;
     setModelStatus("loading");
     setLoadError(null);
@@ -193,7 +189,7 @@ export default function App() {
     setProgress({ percent: null, loaded: 0, total: 0 });
     setSpeed(0);
     speedSample = { loaded: 0, at: performance.now(), speed: 0 };
-    const request: WorkerRequest = { type: "load", device, dtype };
+    const request: WorkerRequest = { type: "load", device };
     worker.postMessage(request);
   }
 
@@ -233,28 +229,18 @@ export default function App() {
           }
         }
 
-        if (stage() === "cache-check" || stage() === "downloading") {
+        if (stage() === "cache-check") {
           setStage("downloading");
         }
         break;
       }
 
-      case "caching":
-        if (message.phase === "start") setStage("caching");
-        break;
-
       case "cache":
         setCacheBytes(Number(message.bytes) || 0);
         break;
 
-      case "cache-error":
-        setCacheWarning(message.message);
-        showToast(message.message, "warning");
-        break;
-
       case "cache-cleared":
         setCacheBytes(0);
-        setCacheWarning(null);
         showToast("Model cache cleared. It will download again on the next reload.", "info");
         break;
 
@@ -517,7 +503,7 @@ export default function App() {
       if (generating()) {
         showToast("Stop the current response before switching the compute backend.", "warning");
       } else {
-        loadModel(next.device, next.dtype);
+        loadModel(next.device);
       }
     }
   }
@@ -529,7 +515,7 @@ export default function App() {
     }
 
     const confirmed = window.confirm(
-      "Delete the cached model files from IndexedDB?\n\nThe chat keeps working until you reload. Next time, the ~862 MB model will download again.",
+      "Delete the cached model file from browser storage (OPFS)?\n\nThe current chat keeps working until you reload. Next time, the ~398 MB Q4_K_M model will download again.",
     );
     if (!confirmed) return;
     const request: WorkerRequest = { type: "clear-cache" };
@@ -552,7 +538,6 @@ export default function App() {
         open={sidebarOpen()}
         modelStatus={modelStatus()}
         cacheBytes={cacheBytes()}
-        cacheWarning={cacheWarning()}
         progressPercent={progress().percent}
         progressLoaded={progress().loaded}
         progressTotal={progress().total}
@@ -561,7 +546,7 @@ export default function App() {
         onDelete={(id) => void removeConversation(id)}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearCache={clearCache}
-        onRetry={() => loadModel(settings().device, settings().dtype)}
+        onRetry={() => loadModel(settings().device)}
       />
 
       <Show when={sidebarOpen()}>
@@ -598,7 +583,7 @@ export default function App() {
 
           <div class="topbar-actions">
             <Show when={cacheBytes() > 0}>
-              <span class="cache-chip" title="Model files cached in IndexedDB">
+              <span class="cache-chip" title="Model file cached in browser storage (OPFS)">
                 <IconDatabase size={13} />
                 {formatBytes(cacheBytes())}
               </span>
@@ -662,7 +647,7 @@ export default function App() {
         total={progress().total}
         speed={speed()}
         cachedBytes={cacheBytes()}
-        onRetry={() => loadModel(settings().device, settings().dtype)}
+        onRetry={() => loadModel(settings().device)}
       />
 
       <Show when={toast()}>

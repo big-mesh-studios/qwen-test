@@ -62,7 +62,6 @@ interface SidebarProps {
   open: boolean;
   modelStatus: ModelStatus;
   cacheBytes: number;
-  cacheWarning: string | null;
   progressPercent: number | null;
   progressLoaded: number;
   progressTotal: number;
@@ -164,7 +163,7 @@ export function Sidebar(props: SidebarProps) {
             <IconCpu size={15} />
             <span>Qwen2.5-Coder-0.5B</span>
           </div>
-          <div class="model-card-meta">Q4 · 4-bit · runs in your browser</div>
+          <div class="model-card-meta">Q4_K_M · GGUF · runs in your browser</div>
 
           <Show when={props.modelStatus === "loading"}>
             <div class="mini-progress">
@@ -192,10 +191,6 @@ export function Sidebar(props: SidebarProps) {
               <IconRefresh size={13} />
               Retry load
             </button>
-          </Show>
-
-          <Show when={props.cacheWarning}>
-            <div class="model-card-warning">{props.cacheWarning}</div>
           </Show>
 
           <div class="model-card-actions">

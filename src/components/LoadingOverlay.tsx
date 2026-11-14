@@ -26,11 +26,9 @@ export function LoadingOverlay(props: LoadingOverlayProps) {
   const stageLabel = () => {
     switch (props.stage) {
       case "cache-check":
-        return "Checking the IndexedDB cache…";
+        return "Checking the local model cache…";
       case "downloading":
-        return "Downloading from Hugging Face";
-      case "caching":
-        return "Saving weights to IndexedDB…";
+        return "Downloading the GGUF model from Hugging Face";
       case "initializing":
         return "Loading the model into memory…";
       case "stopping":
@@ -125,15 +123,15 @@ export function LoadingOverlay(props: LoadingOverlayProps) {
             </span>
             <span>
               <IconZap size={13} />
-              {eta() ? `${eta()} left` : "Q4 · 4-bit"}
+              {eta() ? `${eta()} left` : "Q4_K_M · 398 MB"}
             </span>
           </div>
 
           <p class="overlay-note">
             <IconDatabase size={14} />
             <span>
-              The model is cached in IndexedDB. After this first download, it starts instantly
-              and works offline.
+              The GGUF model is cached in this browser's private file storage (OPFS). After the
+              first download, it starts from local storage and does not download again.
             </span>
           </p>
         </Show>

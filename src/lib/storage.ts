@@ -20,7 +20,6 @@ export const DEFAULT_SETTINGS: Settings = {
   maxNewTokens: 512,
   repetitionPenalty: 1.05,
   device: "wasm",
-  dtype: "q4",
 };
 
 export function createConversation(): Conversation {
@@ -95,8 +94,10 @@ export function loadSettings(): Settings {
     const parsed = JSON.parse(raw) as Partial<Settings>;
 
     return {
-      ...DEFAULT_SETTINGS,
-      ...parsed,
+      systemPrompt:
+        typeof parsed.systemPrompt === "string"
+          ? parsed.systemPrompt
+          : DEFAULT_SETTINGS.systemPrompt,
       temperature: clamp(parsed.temperature ?? DEFAULT_SETTINGS.temperature, 0, 1.5),
       topP: clamp(parsed.topP ?? DEFAULT_SETTINGS.topP, 0.1, 1),
       maxNewTokens: Math.round(
@@ -108,7 +109,6 @@ export function loadSettings(): Settings {
         1.5,
       ),
       device: parsed.device === "webgpu" ? "webgpu" : "wasm",
-      dtype: parsed.dtype === "q4f16" || parsed.dtype === "q8" ? parsed.dtype : "q4",
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

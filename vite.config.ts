@@ -3,8 +3,16 @@ import solidPlugin from "@solidjs/vite-plugin";
 import { transformAsync } from "@babel/core";
 import solidBabelPlugin from "@solidjs/babel-plugin";
 import presetTypeScript from "@babel/preset-typescript";
+import { copyFile, mkdir, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
-// SharedArrayBuffer (threaded ONNX Runtime WASM) requires cross-origin
+const WLLAMA_WASM = fileURLToPath(
+  new URL("./node_modules/@wllama/wllama/esm/wasm/wllama.wasm", import.meta.url),
+);
+
+// SharedArrayBuffer (threaded llama.cpp/wllama WASM) requires cross-origin
 // isolation. GitHub Pages cannot set headers, so the folder-scoped service
 // worker in public/coi-serviceworker.js adds them at runtime as well.
 const isolationHeaders = {
@@ -12,6 +20,52 @@ const isolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
   "Cross-Origin-Resource-Policy": "cross-origin",
 };
+
+/**
+ * Serve the wllama WASM runtime from our own origin in dev, and copy it into
+ * the production build. Self-hosting keeps the runtime version in lockstep with
+ * the npm package and avoids a third-party CDN fetch under COEP.
+ */
+function bundleWllamaWasm(): Plugin {
+  let outDir = "dist";
+
+  return {
+    name: "bundle-wllama-wasm",
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split("?")[0] !== "/wllama.wasm") {
+          next();
+          return;
+        }
+
+        void (async () => {
+          try {
+            const info = await stat(WLLAMA_WASM);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/wasm");
+            res.setHeader("Content-Length", String(info.size));
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+            if (req.method === "HEAD") {
+              res.end();
+            } else {
+              createReadStream(WLLAMA_WASM).pipe(res);
+            }
+          } catch (error) {
+            next(error);
+          }
+        })();
+      });
+    },
+    async writeBundle() {
+      await mkdir(outDir, { recursive: true });
+      await copyFile(WLLAMA_WASM, resolve(outDir, "wllama.wasm"));
+    },
+  };
+}
 
 /**
  * The official plugin uses a native compiler. Android/Termux has no prebuilt
@@ -53,7 +107,7 @@ const useBabelCompiler =
   process.env.SOLID_BABEL === "1" || process.platform === "android";
 
 export default defineConfig(({ command }) => ({
-  plugins: [useBabelCompiler ? solidBabelFallback() : solidPlugin()],
+  plugins: [useBabelCompiler ? solidBabelFallback() : solidPlugin(), bundleWllamaWasm()],
   // A relative base lets the same build live at /repo/, /team/repo/ or at the
   // origin root on GitHub Pages. Workers and the service worker resolve
   // against this base at runtime.
@@ -65,9 +119,9 @@ export default defineConfig(({ command }) => ({
     target: "esnext",
   },
   optimizeDeps: {
-    // Transformers.js ships its own ESM build and fetches ONNX Runtime WASM
-    // binaries at runtime. Letting Vite pre-bundle it can break those URLs.
-    exclude: ["@huggingface/transformers"],
+    // wllama contains a large self-contained ESM bundle plus worker/WASM
+    // strings. Pre-bundling it can rewrite the runtime URLs it builds.
+    exclude: ["@wllama/wllama"],
   },
   server: {
     host: true,

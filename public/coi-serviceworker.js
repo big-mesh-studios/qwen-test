@@ -1,7 +1,7 @@
 // Adds COOP/COEP to same-origin responses inside this worker's scope.
 //
 // GitHub Pages cannot send custom headers, so `SharedArrayBuffer` (used by the
-// threaded ONNX Runtime WASM build) is normally unavailable there. This worker
+// threaded wllama/llama.cpp WASM build) is normally unavailable there. This worker
 // is registered from the app's own folder, so its default scope is that folder:
 // a project published at /<repo>/ only isolates /<repo>/, not the whole origin.
 //

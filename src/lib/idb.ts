@@ -1,27 +1,18 @@
 /**
  * Tiny promise wrapper around IndexedDB.
  *
- * Two stores:
- *   model-files   – Hugging Face model/tokenizer files (Blobs), keyed by URL
- *   conversations – chat sessions, keyed by id
+ * Version 1 also kept Transformers.js model files in a `model-files` store.
+ * Version 2 drops that store so upgrading users get the old ~874 MB ONNX
+ * cache back; wllama now stores its GGUF model in OPFS instead.
  */
 
 import type { ChatMessage } from "./types";
 
 const DB_NAME = "qwen-coder-chat";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-export const MODEL_STORE = "model-files";
+const LEGACY_MODEL_STORE = "model-files";
 export const CHAT_STORE = "conversations";
-
-export interface StoredModelFile {
-  url: string;
-  blob: Blob;
-  size: number;
-  type: string;
-  headers: [string, string][];
-  cachedAt: number;
-}
 
 export interface StoredConversation {
   id: string;
@@ -55,9 +46,8 @@ export function openDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result;
 
-      if (!db.objectStoreNames.contains(MODEL_STORE)) {
-        const store = db.createObjectStore(MODEL_STORE, { keyPath: "url" });
-        store.createIndex("cachedAt", "cachedAt");
+      if (db.objectStoreNames.contains(LEGACY_MODEL_STORE)) {
+        db.deleteObjectStore(LEGACY_MODEL_STORE);
       }
 
       if (!db.objectStoreNames.contains(CHAT_STORE)) {
@@ -91,13 +81,6 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-}
-
-export async function idbGet<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
-  const db = await openDB();
-  return requestResult<T | undefined>(
-    db.transaction(storeName, "readonly").objectStore(storeName).get(key),
-  );
 }
 
 export async function idbGetAll<T>(storeName: string): Promise<T[]> {
@@ -138,79 +121,4 @@ export async function idbClear(storeName: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
   });
-}
-
-/**
- * Walk every record in a store without loading blobs into memory.
- * `visit` receives the record; the cursor is advanced automatically.
- */
-export async function idbForEach<T>(storeName: string, visit: (record: T) => void): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const request = tx.objectStore(storeName).openCursor();
-
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) return;
-      try {
-        visit(cursor.value as T);
-      } catch (error) {
-        reject(error);
-        return;
-      }
-      cursor.continue();
-    };
-
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
-  });
-}
-
-/**
- * Delete every record matching a predicate.
- */
-export async function idbDeleteWhere<T>(
-  storeName: string,
-  predicate: (record: T) => boolean,
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const request = tx.objectStore(storeName).openCursor();
-
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) return;
-      if (predicate(cursor.value as T)) cursor.delete();
-      cursor.continue();
-    };
-
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
-  });
-}
-
-/**
- * Size and file count for a store, optionally filtered.
- * Uses the stored byte size, never reading the blob itself.
- */
-export async function idbStats<T extends { size?: number; blob?: Blob }>(
-  storeName: string,
-  predicate: (record: T) => boolean = () => true,
-): Promise<{ bytes: number; files: number }> {
-  let bytes = 0;
-  let files = 0;
-
-  await idbForEach<T>(storeName, (record) => {
-    if (!predicate(record)) return;
-    files += 1;
-    bytes += record.size ?? record.blob?.size ?? 0;
-  });
-
-  return { bytes, files };
 }

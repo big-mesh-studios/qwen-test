@@ -1,19 +1,21 @@
 # Qwen Coder Chat
 
-A fully client-side chat app for **Qwen2.5-Coder-0.5B-Instruct (q4)**. It runs in
-the browser with [Transformers.js](https://huggingface.co/docs/transformers.js)
-and [Solid 2.0](https://github.com/solidjs/solid), is written in TypeScript, and
-keeps the model weights in IndexedDB so the 860 MB download happens only once.
+A fully client-side chat app for **Qwen2.5-Coder-0.5B-Instruct (Q4_K_M GGUF)**.
+It runs in the browser with [wllama](https://github.com/ngxson/wllama)
+(llama.cpp compiled to WebAssembly) and
+[Solid 2.0](https://github.com/solidjs/solid), is written in TypeScript, and
+keeps the ~398 MB model in the browser's private file storage so the download
+happens only once.
 
 There is no application server: Vite only serves the static app, and inference,
 storage, and chat history all stay in the browser.
 
 ## Features
 
-- **Local inference** — Qwen2.5-Coder-0.5B-Instruct q4 in a Web Worker (WASM
-  by default, experimental WebGPU option).
-- **First-run download + IndexedDB cache** — progress, speed, per-file status,
-  and a cache-size indicator. Reloads reuse the cached weights.
+- **Local inference** — Qwen2.5-Coder-0.5B-Instruct Q4_K_M in a Web Worker
+  (WASM by default, experimental WebGPU option).
+- **First-run download + OPFS cache** — progress, speed, and a cache-size
+  indicator. Reloads reuse the cached GGUF file.
 - **Streaming responses** — token-by-token Markdown with code blocks and copy
   buttons, stop/abort support, and token/elapsed stats.
 - **Chat app UX** — persistent conversation list, generated titles, dark/light
@@ -32,8 +34,8 @@ storage, and chat history all stay in the browser.
 - pnpm 11 (`corepack enable` is the easiest way to get the pinned version)
 - A modern browser with WebAssembly. WebGPU is optional and only used when
   selected in Settings.
-- **About 2–3 GB of free RAM** while the model initializes, and enough disk
-  space for the ~874 MB of model files. A desktop browser is recommended.
+- **About 1–2 GB of free RAM** while the model initializes, and roughly 400 MB
+  of disk space for the GGUF file. A desktop browser is recommended.
 
 ## Run it
 
@@ -56,7 +58,7 @@ pnpm preview
 
 ## Cross-origin isolation and SharedArrayBuffer
 
-The threaded ONNX Runtime WASM build uses `SharedArrayBuffer`, which browsers
+wllama's threaded llama.cpp WASM build uses `SharedArrayBuffer`, which browsers
 only expose to cross-origin isolated pages. The app needs two things:
 
 1. `Cross-Origin-Opener-Policy: same-origin` and
@@ -65,7 +67,8 @@ only expose to cross-origin isolated pages. The app needs two things:
    from other origins (or hosts that set compatible CORP headers).
 
 Vite dev and preview send those headers directly (`vite.config.ts`), so
-`window.crossOriginIsolated` is true locally.
+`window.crossOriginIsolated` is true locally. Without isolation wllama still
+runs, but with a single thread.
 
 GitHub Pages cannot send custom headers. To make the deployed app work there,
 [`public/coi-serviceworker.js`](public/coi-serviceworker.js) intercepts
@@ -77,9 +80,8 @@ and reloads the page once after it takes control, because the navigation respons
 itself must carry the headers. A `sessionStorage` flag prevents reload loops if a
 browser still refuses to isolate the page.
 
-The worker only handles requests inside its scope. Requests to Hugging Face and
-the ONNX Runtime CDN are not rewritten, though they still need to allow
-cross-origin embedding (the CDNs do).
+The worker only handles requests inside its scope. Requests to Hugging Face are
+not rewritten, though they still need to allow cross-origin embedding (they do).
 
 ## Deploy to GitHub Pages
 
@@ -106,18 +108,26 @@ the service worker resolve relative to the deployed URL at runtime.
 
 ## Model and cache behavior
 
-1. On startup the worker checks IndexedDB for the model files.
-2. On a cache miss it downloads the q4 ONNX weights, tokenizer, and configs
-   from `huggingface.co` (about 874 MB in total, ~862 MB of weights).
-3. Files are written to IndexedDB (`qwen-coder-chat` → `model-files`) as Blobs.
-4. Later launches load the same files from IndexedDB. The sidebar and top bar
-   show the cached size.
-5. **Settings → Storage → Clear cached model** deletes the cached files. The
-   current chat keeps working until reload; the next load downloads again.
+The model is
+[`bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF`](https://huggingface.co/bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF),
+file `Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf` (397,808,288 bytes).
 
-The ONNX Runtime WASM runtime itself is loaded by Transformers.js from
-`cdn.jsdelivr.net`, so the first initialization needs network access even if the
-weights are cached. Chat history and weights are never uploaded anywhere.
+1. On startup the worker lists the model files in wllama's cache manager, which
+   uses the browser's origin-private file system (OPFS).
+2. On a cache miss it downloads the GGUF file directly from `huggingface.co`
+   (about 398 MB) and streams it into OPFS.
+3. Later launches read the cached file from OPFS without calling the Hugging
+   Face API. The sidebar and top bar show the cached size.
+4. **Settings → Clear model cache** deletes the cached file. The current chat
+   keeps working until reload; the next load downloads again.
+
+The wllama WASM runtime is copied into the build and served from the app's own
+origin, so it stays in lockstep with the npm package and needs no third-party
+CDN. Chat history and weights are never uploaded anywhere.
+
+Upgrading from the earlier Transformers.js build bumps the IndexedDB schema to
+version 2, which drops the old `model-files` store and reclaims the ~874 MB ONNX
+cache automatically.
 
 > The model is a demo-sized 0.5B coding model. Expect short, simple answers and
 > CPU-bound token generation, not cloud-model quality or speed.
@@ -129,22 +139,20 @@ weights are cached. Chat history and weights are never uploaded anywhere.
   detects `process.platform === "android"` and compiles TSX with the pure-JS
   Babel plugin (including `@babel/preset-typescript`) instead. Set
   `SOLID_BABEL=1` to force that path anywhere.
-- `pnpm-workspace.yaml` disables install scripts for `onnxruntime-node` and
-  `protobufjs`. They are Node-only transitive dependencies and are not needed
-  for the browser build, which avoids `EBADPLATFORM`/postinstall failures.
 - The package manager is pinned with `packageManager`; use pnpm rather than npm
   so the lockfile stays authoritative.
+- Loading the full model on a phone is memory-hungry. Close other tabs if the
+  browser reloads the page during initialization.
 
 ## Project layout
 
 ```
 src/
   App.tsx                 app state, worker messaging, persistence
-  worker.ts               Transformers.js pipeline, streaming, abort, progress
+  worker.ts               wllama loading, streaming, abort, OPFS cache
   index.tsx               app bootstrap and isolation registration
   lib/types.ts            shared chat, settings, and worker message types
   lib/isolation.ts        folder-scoped COI service worker registration
-  lib/modelCache.ts       Web Cache API-shaped cache backed by IndexedDB
   lib/idb.ts              IndexedDB stores and helpers
   lib/storage.ts          conversations, settings, theme
   lib/markdown.ts         dependency-free Markdown parser

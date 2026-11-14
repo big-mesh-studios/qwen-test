@@ -1,13 +1,11 @@
 export type Role = "system" | "user" | "assistant";
 export type Device = "wasm" | "webgpu";
-export type Dtype = "q4" | "q4f16" | "q8";
 export type Theme = "dark" | "light";
 export type ModelStatus = "idle" | "loading" | "ready" | "error";
 
 export type Stage =
   | "cache-check"
   | "downloading"
-  | "caching"
   | "initializing"
   | "stopping"
   | "ready"
@@ -44,7 +42,6 @@ export interface Settings {
   maxNewTokens: number;
   repetitionPenalty: number;
   device: Device;
-  dtype: Dtype;
 }
 
 export interface CacheStats {
@@ -61,13 +58,8 @@ export interface GenerationOptions {
 
 export type ChatRequestMessage = Pick<ChatMessage, "role" | "content">;
 
-export interface FileProgress {
-  loaded: number;
-  total: number;
-}
-
 export type WorkerRequest =
-  | { type: "load"; device?: Device; dtype?: Dtype }
+  | { type: "load"; device?: Device }
   | {
       type: "generate";
       id: string;
@@ -85,27 +77,11 @@ export type WorkerResponse =
       loaded: number;
       total: number;
       percent?: number;
-      files?: Record<string, FileProgress>;
-    }
-  | {
-      type: "file-progress";
-      file: string;
-      loaded: number;
-      total: number;
-      percent?: number;
-    }
-  | {
-      type: "caching";
-      phase: "start" | "progress" | "done" | "saved";
-      file: string;
-      loaded: number;
-      total: number;
     }
   | { type: "cache"; bytes: number; files: number }
-  | { type: "cache-error"; message: string }
   | { type: "cache-cleared" }
   | { type: "warning"; message: string }
-  | { type: "ready"; device: Device; dtype: Dtype; cachedBytes?: number }
+  | { type: "ready"; device: Device; cachedBytes?: number }
   | { type: "token"; id: string; text: string }
   | {
       type: "done";
