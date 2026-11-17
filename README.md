@@ -1,10 +1,10 @@
 # Qwen Coder Chat
 
-A fully client-side chat app for **Qwen2.5-Coder-0.5B-Instruct (Q4_K_M GGUF)**.
+A fully client-side chat app for **Qwen3.5-2B (Q4_K_M GGUF)**.
 It runs in the browser with [wllama](https://github.com/ngxson/wllama)
 (llama.cpp compiled to WebAssembly) and
 [Solid 2.0](https://github.com/solidjs/solid), is written in TypeScript, and
-keeps the ~398 MB model in the browser's private file storage so the download
+keeps the ~1.27 GB model in the browser's private file storage so the download
 happens only once.
 
 There is no application server: Vite only serves the static app, and inference,
@@ -12,7 +12,7 @@ storage, and chat history all stay in the browser.
 
 ## Features
 
-- **Local inference** — Qwen2.5-Coder-0.5B-Instruct Q4_K_M in a Web Worker
+- **Local inference** — Qwen3.5-2B Q4_K_M in a Web Worker
   (WASM by default, experimental WebGPU option).
 - **First-run download + OPFS cache** — progress, speed, and a cache-size
   indicator. Reloads reuse the cached GGUF file.
@@ -34,7 +34,7 @@ storage, and chat history all stay in the browser.
 - pnpm 11 (`corepack enable` is the easiest way to get the pinned version)
 - A modern browser with WebAssembly. WebGPU is optional and only used when
   selected in Settings.
-- **About 1–2 GB of free RAM** while the model initializes, and roughly 400 MB
+- **About 2–3 GB of free RAM** while the model initializes, and roughly 1.3 GB
   of disk space for the GGUF file. A desktop browser is recommended.
 
 ## Run it
@@ -55,6 +55,17 @@ pnpm preview
 
 `pnpm build` type-checks the project with `tsc --noEmit` before running
 `vite build`. Run `pnpm typecheck` on its own to check types without building.
+
+### Test the chat UI without the model
+
+Run `pnpm dev` and open <http://localhost:5173/?mock=1>. A dev-only mock worker
+speaks the same worker protocol as the real model and streams a fake Markdown
+reply, so streaming, stop, persistence, and reactivity can be tested without
+downloading the ~1.27 GB GGUF. Drop `?mock=1` to use the real model. The mock
+worker is only selected in development builds.
+
+`pnpm check:reactivity` runs a small offline harness for the Solid 2.0 keyed
+message list, using `flush()` to force streamed updates.
 
 ## Cross-origin isolation and SharedArrayBuffer
 
@@ -109,13 +120,16 @@ the service worker resolve relative to the deployed URL at runtime.
 ## Model and cache behavior
 
 The model is
-[`bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF`](https://huggingface.co/bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF),
-file `Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf` (397,808,288 bytes).
+[`KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF`](https://huggingface.co/KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF),
+file `qwen3.5-2b-text-only-q4_k_m.gguf` (1,274,388,448 bytes). The GGUF was
+converted without `tokenizer.chat_template`, so the worker supplies the
+[official Qwen3.5 template](https://huggingface.co/Qwen/Qwen3.5-2B) from
+`src/lib/qwen35-chat-template.ts` when loading it.
 
 1. On startup the worker lists the model files in wllama's cache manager, which
    uses the browser's origin-private file system (OPFS).
 2. On a cache miss it downloads the GGUF file directly from `huggingface.co`
-   (about 398 MB) and streams it into OPFS.
+   (about 1.27 GB) and streams it into OPFS.
 3. Later launches read the cached file from OPFS without calling the Hugging
    Face API. The sidebar and top bar show the cached size.
 4. **Settings → Clear model cache** deletes the cached file. The current chat
@@ -129,8 +143,8 @@ Upgrading from the earlier Transformers.js build bumps the IndexedDB schema to
 version 2, which drops the old `model-files` store and reclaims the ~874 MB ONNX
 cache automatically.
 
-> The model is a demo-sized 0.5B coding model. Expect short, simple answers and
-> CPU-bound token generation, not cloud-model quality or speed.
+> The model is a 2B text-only model. Expect CPU-bound token generation on the
+> WASM backend, not cloud-model speed.
 
 ## Android / Termux notes
 
@@ -150,16 +164,20 @@ cache automatically.
 src/
   App.tsx                 app state, worker messaging, persistence
   worker.ts               wllama loading, streaming, abort, OPFS cache
+  mock-worker.ts          dev-only fake model for UI testing (?mock=1)
   index.tsx               app bootstrap and isolation registration
   lib/types.ts            shared chat, settings, and worker message types
   lib/isolation.ts        folder-scoped COI service worker registration
   lib/idb.ts              IndexedDB stores and helpers
   lib/storage.ts          conversations, settings, theme
+  lib/qwen35-chat-template.ts  chat template supplied to the GGUF
   lib/markdown.ts         dependency-free Markdown parser
   components/             sidebar, chat, composer, settings, overlay, icons
   styles.css              responsive dark/light design
 public/
   coi-serviceworker.js    COOP/COEP/CORP service worker for static hosts
+scripts/
+  reactivity-check.mjs    offline Solid keyed-list reactivity harness
 .github/workflows/
   ci.yml                  typecheck + build checks
   gh-pages.yml            build and deploy to the gh-pages branch
@@ -171,5 +189,6 @@ public/
 | ---------------- | ----------------------------------------- |
 | `pnpm dev`       | Start the Vite dev server                 |
 | `pnpm typecheck` | Type-check without emitting files         |
+| `pnpm check:reactivity` | Run the offline Solid keyed-list harness |
 | `pnpm build`     | Type-check, then build the static site    |
 | `pnpm preview`   | Serve the production build locally        |

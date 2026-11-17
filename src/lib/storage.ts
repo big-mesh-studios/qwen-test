@@ -40,10 +40,18 @@ export async function loadConversations(): Promise<Conversation[]> {
       .map((record) => ({
         ...record,
         // A placeholder can be left behind if the tab closed mid-generation.
-        messages: (record.messages ?? []).filter(
-          (message: ChatMessage) =>
-            message.role !== "assistant" || message.content || message.error,
-        ),
+        messages: (record.messages ?? [])
+          .filter(
+            (message: ChatMessage) =>
+              message.role !== "assistant" || message.content || message.error,
+          )
+          // Older records may predate message ids. <For> keys rows by id, so a
+          // missing id makes every row share the same key and breaks updates.
+          .map((message: ChatMessage) => ({
+            ...message,
+            id: message.id || uid("msg"),
+            createdAt: message.createdAt || Date.now(),
+          })),
       }))
       .filter((record) => record.messages.length > 0)
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));

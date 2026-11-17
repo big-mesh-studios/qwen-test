@@ -112,7 +112,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
 
       <p class="eyebrow">
         <span class="eyebrow-dot" />
-        Qwen2.5-Coder · 0.5B · Q4_K_M · local
+        Qwen3.5 · 2B · Q4_K_M · local
       </p>
 
       <h1>
@@ -120,7 +120,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
       </h1>
 
       <p class="hero-copy">
-        A tiny coding model that runs entirely in your browser. No API keys, no server, no data
+        A compact 2B model that runs entirely in your browser. No API keys, no server, no data
         leaving this tab.
       </p>
 
@@ -145,7 +145,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
       </div>
 
       <p class="hero-foot">
-        First run downloads the GGUF model (~398 MB). It is cached in the browser's private file
+        First run downloads the GGUF model (~1.27 GB). It is cached in the browser's private file
         storage (OPFS) so later startups do not download it again.
       </p>
     </section>

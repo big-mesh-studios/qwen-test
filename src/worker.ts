@@ -6,6 +6,7 @@ import {
   type ChatCompletionChunk,
   type ChatCompletionMessage,
 } from "@wllama/wllama";
+import { QWEN35_CHAT_TEMPLATE } from "./lib/qwen35-chat-template";
 import type {
   ChatRequestMessage,
   Device,
@@ -14,13 +15,18 @@ import type {
   WorkerResponse,
 } from "./lib/types";
 
-const MODEL_REPO = "bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF";
-const MODEL_FILE = "Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf";
+const MODEL_REPO = "KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF";
+const MODEL_FILE = "qwen3.5-2b-text-only-q4_k_m.gguf";
 // Resolving the file URL directly (instead of asking the HF API) lets a
 // fully cached model load without contacting Hugging Face.
 const MODEL_URL = `https://huggingface.co/${MODEL_REPO}/resolve/main/${MODEL_FILE}`;
-const MODEL_BYTES = 397_808_288;
+const MODEL_BYTES = 1_274_388_448;
 const CONTEXT_TOKENS = 4096;
+
+// Keep the old repo/file names so "Clear cache" can reclaim the previous model
+// after users upgrade.
+const LEGACY_MODEL_REPO = "bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF";
+const LEGACY_MODEL_FILE = "Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf";
 
 // Vite copies the matching wllama build into the site root. The worker bundle
 // lives in `assets/`, so one level up resolves to the deployed base URL.
@@ -78,7 +84,13 @@ function getCacheManager(): CacheManager | null {
 
 function isModelEntry(entry: CacheEntry): boolean {
   const url = entry.metadata?.originalURL ?? "";
-  return url.includes(MODEL_REPO) || entry.name.includes("Qwen2.5-Coder-0.5B-Instruct");
+  const name = entry.name.toLowerCase();
+  return (
+    url.includes(MODEL_REPO) ||
+    url.includes(LEGACY_MODEL_REPO) ||
+    name.includes(MODEL_FILE) ||
+    name.includes(LEGACY_MODEL_FILE.toLowerCase())
+  );
 }
 
 async function getCacheStats(): Promise<{ bytes: number; files: number }> {
@@ -184,6 +196,10 @@ async function loadModel(
     await next.loadModelFromUrl(MODEL_URL, {
       useCache: true,
       n_ctx: CONTEXT_TOKENS,
+      // The GGUF was converted without tokenizer.chat_template. Supply the
+      // official Qwen3.5 template so createChatCompletion() works.
+      chat_template: QWEN35_CHAT_TEMPLATE,
+      jinja: true,
       // wllama defaults to offloading every layer. WASM must explicitly use 0.
       n_gpu_layers: device === "webgpu" ? 99999 : 0,
       progressCallback: ({ loaded, total }) => {
@@ -283,11 +299,22 @@ async function generate({
       messages: messages as ChatCompletionMessage[],
       stream: true,
       onData: (chunk: ChatCompletionChunk) => {
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (typeof delta === "string" && delta.length > 0) {
+        // Most GGUFs stream `content`, but reasoning models can put their
+        // tokens in `reasoning_content`. Fall back to it so the UI still
+        // receives updates instead of sitting on "Thinking" until the end.
+        const delta = chunk.choices?.[0]?.delta as
+          | { content?: string | null; reasoning_content?: string | null }
+          | undefined;
+        const piece =
+          typeof delta?.content === "string"
+            ? delta.content
+            : typeof delta?.reasoning_content === "string"
+              ? delta.reasoning_content
+              : "";
+        if (piece.length > 0) {
           chunks += 1;
-          text += delta;
-          post({ type: "token", id, text: delta });
+          text += piece;
+          post({ type: "token", id, text: piece });
         }
 
         const reported = chunk.usage?.completion_tokens ?? chunk.timings?.predicted_n;
@@ -299,6 +326,8 @@ async function generate({
       top_p: topP,
       penalty_repeat: repetitionPenalty,
       cache_prompt: true,
+      // Qwen3.5's template enables an empty think block when this is false.
+      chat_template_kwargs: { enable_thinking: false },
     });
 
     post({

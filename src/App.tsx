@@ -41,7 +41,14 @@ import type {
   WorkerResponse,
 } from "./lib/types";
 
-const MODEL_NAME = "Qwen2.5-Coder-0.5B";
+const MODEL_NAME = "Qwen3.5-2B";
+
+// Dev-only UI harness: open the app with ?mock=1 to stream fake replies
+// without downloading the GGUF.
+const MOCK_MODEL =
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("mock");
 
 type ToastTone = "info" | "warning" | "error";
 
@@ -115,7 +122,9 @@ export default function App() {
   );
 
   const headerSubtitle = () => {
-    if (modelStatus() === "ready") return `${MODEL_NAME} · Q4_K_M · local`;
+    if (modelStatus() === "ready") {
+      return `${MODEL_NAME} · Q4_K_M · local${MOCK_MODEL ? " · mock" : ""}`;
+    }
     if (modelStatus() === "loading") return "Loading the model…";
     if (modelStatus() === "error") return "Model unavailable";
     return "Starting up…";
@@ -130,7 +139,9 @@ export default function App() {
   );
 
   onSettled(() => {
-    worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+    worker = MOCK_MODEL
+      ? new Worker(new URL("./mock-worker.ts", import.meta.url), { type: "module" })
+      : new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = handleWorkerMessage;
     worker.onerror = (event) => {
       const message = event.message || "The model worker crashed.";
@@ -258,6 +269,7 @@ export default function App() {
           total: current.total || current.loaded,
         }));
         if (typeof message.cachedBytes === "number") setCacheBytes(message.cachedBytes);
+        if (MOCK_MODEL) showToast("Mock model mode: no GGUF is loaded.", "info");
         break;
 
       case "token": {
@@ -515,7 +527,7 @@ export default function App() {
     }
 
     const confirmed = window.confirm(
-      "Delete the cached model file from browser storage (OPFS)?\n\nThe current chat keeps working until you reload. Next time, the ~398 MB Q4_K_M model will download again.",
+      "Delete the cached model file from browser storage (OPFS)?\n\nThe current chat keeps working until you reload. Next time, the ~1.27 GB Q4_K_M model will download again.",
     );
     if (!confirmed) return;
     const request: WorkerRequest = { type: "clear-cache" };

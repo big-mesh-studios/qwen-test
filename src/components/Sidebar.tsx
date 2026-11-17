@@ -161,7 +161,7 @@ export function Sidebar(props: SidebarProps) {
 
           <div class="model-card-name">
             <IconCpu size={15} />
-            <span>Qwen2.5-Coder-0.5B</span>
+            <span>Qwen3.5-2B</span>
           </div>
           <div class="model-card-meta">Q4_K_M · GGUF · runs in your browser</div>
 

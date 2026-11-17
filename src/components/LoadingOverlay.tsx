@@ -123,7 +123,7 @@ export function LoadingOverlay(props: LoadingOverlayProps) {
             </span>
             <span>
               <IconZap size={13} />
-              {eta() ? `${eta()} left` : "Q4_K_M · 398 MB"}
+              {eta() ? `${eta()} left` : "Q4_K_M · 1.27 GB"}
             </span>
           </div>
 
