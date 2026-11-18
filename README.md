@@ -1,27 +1,31 @@
 # Qwen Coder Chat
 
-A fully client-side chat app for **Qwen3.5-2B (Q4_K_M GGUF)**.
-It runs in the browser with [wllama](https://github.com/ngxson/wllama)
+A fully client-side chat app for local coding models. Choose **Qwen3.5-2B**
+(Q4_K_M) or Prism ML's **Ternary Bonsai 2** (2B, 4B, or 9B, Q2_0) on the start
+screen. Models run in the browser with [wllama](https://github.com/ngxson/wllama)
 (llama.cpp compiled to WebAssembly) and
-[Solid 2.0](https://github.com/solidjs/solid), is written in TypeScript, and
-keeps the ~1.27 GB model in the browser's private file storage so the download
-happens only once.
+[Solid 2.0](https://github.com/solidjs/solid), are written in TypeScript, and are
+cached in the browser's private file storage after the first download.
 
 There is no application server: Vite only serves the static app, and inference,
 storage, and chat history all stay in the browser.
 
 ## Features
 
-- **Local inference** — Qwen3.5-2B Q4_K_M in a Web Worker
+- **Model picker** — choose Qwen3.5-2B or Bonsai 2 (2B/4B/9B) at startup, then
+  switch again from Settings. Each GGUF is downloaded only when needed.
+- **Local inference** — Qwen Q4_K_M or Bonsai ternary Q2_0 in a Web Worker
   (WASM by default, experimental WebGPU option).
-- **First-run download + OPFS cache** — progress, speed, and a cache-size
-  indicator. Reloads reuse the cached GGUF file.
+- **First-run download + OPFS cache** — progress, speed, and per-model cache
+  indicators. Every model is cached separately, so switching back does not
+  download it again.
 - **Streaming responses** — token-by-token Markdown with code blocks and copy
   buttons, stop/abort support, and token/elapsed stats.
 - **Chat app UX** — persistent conversation list, generated titles, dark/light
   themes, responsive sidebar, keyboard shortcuts, and Markdown rendering.
-- **Settings** — system prompt, temperature, top-p, max new tokens, repetition
-  penalty, compute backend, and cache management.
+- **Settings** — model, system prompt, temperature, top-p, max new tokens,
+  repetition penalty, compute backend, cache management, and a reset-to-defaults
+  button (including the system prompt).
 - **No backend** — chats are stored in IndexedDB; settings and theme in
   `localStorage`.
 - **Static hosting friendly** — GitHub Actions publishes to GitHub Pages, and a
@@ -34,8 +38,10 @@ storage, and chat history all stay in the browser.
 - pnpm 11 (`corepack enable` is the easiest way to get the pinned version)
 - A modern browser with WebAssembly. WebGPU is optional and only used when
   selected in Settings.
-- **About 2–3 GB of free RAM** while the model initializes, and roughly 1.3 GB
-  of disk space for the GGUF file. A desktop browser is recommended.
+- **Disk/cache:** about 0.55 GB for Bonsai 2B, 1.21 GB for 4B, 2.56 GB for 9B,
+  or 1.27 GB for Qwen3.5-2B.
+- **RAM:** roughly 2–3 GB free for the 2B models and Qwen; the 9B pack is
+  desktop-class and needs considerably more. A desktop browser is recommended.
 
 ## Run it
 
@@ -59,10 +65,9 @@ pnpm preview
 ### Test the chat UI without the model
 
 Run `pnpm dev` and open <http://localhost:5173/?mock=1>. A dev-only mock worker
-speaks the same worker protocol as the real model and streams a fake Markdown
-reply, so streaming, stop, persistence, and reactivity can be tested without
-downloading the ~1.27 GB GGUF. Drop `?mock=1` to use the real model. The mock
-worker is only selected in development builds.
+speaks the same worker protocol as the real model, including the model picker,
+and streams a fake Markdown reply. Streaming, stop, persistence, and reactivity
+can be tested without downloading a GGUF. Drop `?mock=1` to use a real model.
 
 `pnpm check:reactivity` runs a small offline harness for the Solid 2.0 keyed
 message list, using `flush()` to force streamed updates.
@@ -119,21 +124,40 @@ the service worker resolve relative to the deployed URL at runtime.
 
 ## Model and cache behavior
 
-The model is
-[`KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF`](https://huggingface.co/KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF),
-file `qwen3.5-2b-text-only-q4_k_m.gguf` (1,274,388,448 bytes). The GGUF was
-converted without `tokenizer.chat_template`, so the worker supplies the
-[official Qwen3.5 template](https://huggingface.co/Qwen/Qwen3.5-2B) from
-`src/lib/qwen35-chat-template.ts` when loading it.
+The start screen offers one file per model, and the worker downloads only the
+one you choose:
 
-1. On startup the worker lists the model files in wllama's cache manager, which
-   uses the browser's origin-private file system (OPFS).
-2. On a cache miss it downloads the GGUF file directly from `huggingface.co`
-   (about 1.27 GB) and streams it into OPFS.
-3. Later launches read the cached file from OPFS without calling the Hugging
-   Face API. The sidebar and top bar show the cached size.
-4. **Settings → Clear model cache** deletes the cached file. The current chat
-   keeps working until reload; the next load downloads again.
+| Model | Hugging Face repo / file | Size | Quant |
+| - | - | -: | - |
+| Qwen3.5 2B | `KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF` · `qwen3.5-2b-text-only-q4_k_m.gguf` | 1.27 GB | Q4_K_M |
+| Bonsai 2 · 2B | `prism-ml/Ternary-Bonsai-2-2B-gguf` · `Ternary-Bonsai-2-2B-Q2_0.gguf` | 0.55 GB | Q2_0 ternary |
+| Bonsai 2 · 4B | `prism-ml/Ternary-Bonsai-2-4B-gguf` · `Ternary-Bonsai-2-4B-Q2_0.gguf` | 1.21 GB | Q2_0 ternary |
+| Bonsai 2 · 9B | `prism-ml/Ternary-Bonsai-2-9B-gguf` · `Ternary-Bonsai-2-9B-Q2_0.gguf` | 2.56 GB | Q2_0 ternary |
+
+Bonsai 2 uses the upstream `Q2_0` container, not Prism ML's fork-only `PQ2_0`
+or `PTQ1_0` packings, because the bundled wllama/llama.cpp build can read
+`Q2_0` and includes the Hadamard activation runtime the weights need. The
+Bonsai weights come from the
+[`prism-ml` organisation](https://huggingface.co/prism-ml) on Hugging Face. The
+27B pack is not offered: its 7.6 GB file cannot fit in the browser's 32-bit
+WebAssembly address space.
+
+The Qwen community GGUF was converted without `tokenizer.chat_template`, so the
+worker supplies the [official Qwen3.5 template](https://huggingface.co/Qwen/Qwen3.5-2B)
+from `src/lib/qwen35-chat-template.ts` when loading it. The Bonsai GGUFs carry
+their own template.
+
+1. On startup the worker lists cached GGUF files in wllama's cache manager,
+   which uses the browser's origin-private file system (OPFS), and reports which
+   models are already available.
+2. When you pick a model, a cache miss downloads the file directly from
+   `huggingface.co` and streams it into OPFS. The picker and progress screen show
+   the size and whether a full or partial copy exists.
+3. Later launches read each cached file from OPFS without calling the Hugging
+   Face API. The sidebar and top bar show the active model's cached size;
+   Settings shows the total for all cached models.
+4. **Settings → Clear model cache** deletes every cached model file. The current
+   chat keeps working until reload; the next load downloads again.
 
 The wllama WASM runtime is copied into the build and served from the app's own
 origin, so it stays in lockstep with the npm package and needs no third-party
@@ -143,8 +167,8 @@ Upgrading from the earlier Transformers.js build bumps the IndexedDB schema to
 version 2, which drops the old `model-files` store and reclaims the ~874 MB ONNX
 cache automatically.
 
-> The model is a 2B text-only model. Expect CPU-bound token generation on the
-> WASM backend, not cloud-model speed.
+> The 2B models are CPU-bound on the WASM backend. Expect local-model speed, not
+> cloud-model speed; the larger Bonsai packs trade memory for quality.
 
 ## Android / Termux notes
 
@@ -166,11 +190,12 @@ src/
   worker.ts               wllama loading, streaming, abort, OPFS cache
   mock-worker.ts          dev-only fake model for UI testing (?mock=1)
   index.tsx               app bootstrap and isolation registration
+  lib/models.ts           model catalogue, sizes, and Hugging Face URLs
   lib/types.ts            shared chat, settings, and worker message types
   lib/isolation.ts        folder-scoped COI service worker registration
   lib/idb.ts              IndexedDB stores and helpers
   lib/storage.ts          conversations, settings, theme
-  lib/qwen35-chat-template.ts  chat template supplied to the GGUF
+  lib/qwen35-chat-template.ts  chat template for the community Qwen GGUF
   lib/markdown.ts         dependency-free Markdown parser
   components/             sidebar, chat, composer, settings, overlay, icons
   styles.css              responsive dark/light design

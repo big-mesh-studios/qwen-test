@@ -28,8 +28,10 @@ import {
   persistTheme,
   saveConversation,
 } from "./lib/storage";
+import { getModel, MODELS } from "./lib/models";
 import { formatBytes, makeTitle, uid } from "./lib/utils";
 import type {
+  CacheStats,
   ChatMessage,
   ChatRequestMessage,
   Conversation,
@@ -40,8 +42,6 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from "./lib/types";
-
-const MODEL_NAME = "Qwen3.5-2B";
 
 // Dev-only UI harness: open the app with ?mock=1 to stream fake replies
 // without downloading the GGUF.
@@ -79,20 +79,21 @@ interface SpeedSample {
 export default function App() {
   const [theme, setTheme] = createSignal<Theme>(loadTheme());
   const [settings, setSettings] = createSignal<Settings>(loadSettings());
+  const [selectedModelId, setSelectedModelId] = createSignal(settings().modelId);
   const [conversations, setConversations] = createSignal<Conversation[]>([]);
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [draft, setDraft] = createSignal("");
 
   const [modelStatus, setModelStatus] = createSignal<ModelStatus>("idle");
   const [loadError, setLoadError] = createSignal<string | null>(null);
-  const [stage, setStage] = createSignal<Stage>("cache-check");
+  const [stage, setStage] = createSignal<Stage>("idle");
   const [progress, setProgress] = createSignal<Progress>({
     percent: null,
     loaded: 0,
     total: 0,
   });
   const [speed, setSpeed] = createSignal(0);
-  const [cacheBytes, setCacheBytes] = createSignal(0);
+  const [modelCache, setModelCache] = createSignal<Record<string, CacheStats>>({});
 
   const [generating, setGenerating] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
@@ -113,6 +114,12 @@ export default function App() {
 
   const activeMessages = createMemo(() => activeConversation()?.messages ?? []);
 
+  const activeModel = createMemo(() => getModel(selectedModelId()));
+  const cacheBytes = createMemo(() => modelCache()[activeModel().id]?.bytes ?? 0);
+  const totalCacheBytes = createMemo(() =>
+    Object.values(modelCache()).reduce((total, stats) => total + (stats?.bytes ?? 0), 0),
+  );
+
   const canSend = createMemo(
     () =>
       modelStatus() === "ready" &&
@@ -122,12 +129,13 @@ export default function App() {
   );
 
   const headerSubtitle = () => {
+    const model = activeModel();
     if (modelStatus() === "ready") {
-      return `${MODEL_NAME} · Q4_K_M · local${MOCK_MODEL ? " · mock" : ""}`;
+      return `${model.name} · ${model.quantization} · local${MOCK_MODEL ? " · mock" : ""}`;
     }
-    if (modelStatus() === "loading") return "Loading the model…";
+    if (modelStatus() === "loading") return `Loading ${model.name}…`;
     if (modelStatus() === "error") return "Model unavailable";
-    return "Starting up…";
+    return "Choose a model to start";
   };
 
   createEffect(
@@ -152,7 +160,9 @@ export default function App() {
       setStopping(false);
     };
 
-    loadModel(settings().device);
+    // Ask for the cache index first; the user picks a model before anything is
+    // downloaded.
+    requestCacheSummary();
     void hydrateConversations();
 
     const onGlobalKeyDown = (event: KeyboardEvent) => {
@@ -192,16 +202,44 @@ export default function App() {
     toastTimer = setTimeout(() => setToast(null), 6000);
   }
 
-  function loadModel(device: Settings["device"] = settings().device): void {
+  function requestCacheSummary(): void {
     if (!worker) return;
+    const request: WorkerRequest = { type: "cache-summary" };
+    worker.postMessage(request);
+  }
+
+  function loadModel(
+    modelId: string = selectedModelId(),
+    device: Settings["device"] = settings().device,
+  ): void {
+    if (!worker) return;
+    const model = getModel(modelId);
+    setSelectedModelId(model.id);
     setModelStatus("loading");
     setLoadError(null);
     setStage("cache-check");
     setProgress({ percent: null, loaded: 0, total: 0 });
     setSpeed(0);
     speedSample = { loaded: 0, at: performance.now(), speed: 0 };
-    const request: WorkerRequest = { type: "load", device };
+    const request: WorkerRequest = { type: "load", modelId: model.id, device };
     worker.postMessage(request);
+  }
+
+  function startModel(): void {
+    const model = activeModel();
+    const next = { ...settings(), modelId: model.id };
+    setSettings(next);
+    persistSettings(next);
+    loadModel(model.id, next.device);
+  }
+
+  function changeModel(): void {
+    setModelStatus("idle");
+    setLoadError(null);
+    setStage("idle");
+    setProgress({ percent: null, loaded: 0, total: 0 });
+    setSpeed(0);
+    requestCacheSummary();
   }
 
   function handleWorkerMessage(event: MessageEvent<WorkerResponse>): void {
@@ -247,12 +285,30 @@ export default function App() {
       }
 
       case "cache":
-        setCacheBytes(Number(message.bytes) || 0);
+        setModelCache((current) => ({
+          ...current,
+          [message.modelId]: {
+            bytes: Number(message.bytes) || 0,
+            files: Number(message.files) || 0,
+          },
+        }));
         break;
 
+      case "cache-summary": {
+        const next: Record<string, CacheStats> = {};
+        for (const entry of message.models) {
+          next[entry.modelId] = {
+            bytes: Number(entry.bytes) || 0,
+            files: Number(entry.files) || 0,
+          };
+        }
+        setModelCache(next);
+        break;
+      }
+
       case "cache-cleared":
-        setCacheBytes(0);
-        showToast("Model cache cleared. It will download again on the next reload.", "info");
+        setModelCache({});
+        showToast("Model cache cleared. It will download again when you load a model.", "info");
         break;
 
       case "warning":
@@ -260,6 +316,7 @@ export default function App() {
         break;
 
       case "ready":
+        setSelectedModelId(message.modelId);
         setModelStatus("ready");
         setStage("ready");
         setLoadError(null);
@@ -268,7 +325,12 @@ export default function App() {
           loaded: current.total || current.loaded,
           total: current.total || current.loaded,
         }));
-        if (typeof message.cachedBytes === "number") setCacheBytes(message.cachedBytes);
+        if (typeof message.cachedBytes === "number") {
+          setModelCache((current) => ({
+            ...current,
+            [message.modelId]: { bytes: message.cachedBytes ?? 0, files: 1 },
+          }));
+        }
         if (MOCK_MODEL) showToast("Mock model mode: no GGUF is loaded.", "info");
         break;
 
@@ -507,16 +569,21 @@ export default function App() {
 
   function saveSettings(next: Settings): void {
     const previous = settings();
+    const modelChanged = next.modelId !== previous.modelId;
+    const deviceChanged = next.device !== previous.device;
+
+    if ((modelChanged || deviceChanged) && generating()) {
+      showToast("Stop the current response before switching the model or backend.", "warning");
+      return;
+    }
+
     setSettings(next);
+    setSelectedModelId(next.modelId);
     persistSettings(next);
     setSettingsOpen(false);
 
-    if (next.device !== previous.device) {
-      if (generating()) {
-        showToast("Stop the current response before switching the compute backend.", "warning");
-      } else {
-        loadModel(next.device);
-      }
+    if (modelChanged || deviceChanged) {
+      loadModel(next.modelId, next.device);
     }
   }
 
@@ -527,7 +594,7 @@ export default function App() {
     }
 
     const confirmed = window.confirm(
-      "Delete the cached model file from browser storage (OPFS)?\n\nThe current chat keeps working until you reload. Next time, the ~1.27 GB Q4_K_M model will download again.",
+      "Delete all cached model files from browser storage (OPFS)?\n\nThe current chat keeps working until you reload. The next model load will download again.",
     );
     if (!confirmed) return;
     const request: WorkerRequest = { type: "clear-cache" };
@@ -548,8 +615,10 @@ export default function App() {
         conversations={conversations()}
         activeId={activeId()}
         open={sidebarOpen()}
+        model={activeModel()}
         modelStatus={modelStatus()}
         cacheBytes={cacheBytes()}
+        totalCacheBytes={totalCacheBytes()}
         progressPercent={progress().percent}
         progressLoaded={progress().loaded}
         progressTotal={progress().total}
@@ -558,7 +627,7 @@ export default function App() {
         onDelete={(id) => void removeConversation(id)}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearCache={clearCache}
-        onRetry={() => loadModel(settings().device)}
+        onRetry={() => loadModel(selectedModelId(), settings().device)}
       />
 
       <Show when={sidebarOpen()}>
@@ -625,7 +694,7 @@ export default function App() {
           </div>
         </header>
 
-        <ChatView messages={activeMessages()} onPick={pickPrompt} />
+        <ChatView messages={activeMessages()} model={activeModel()} onPick={pickPrompt} />
 
         <Composer
           value={draft()}
@@ -642,7 +711,8 @@ export default function App() {
       <Show when={settingsOpen()}>
         <SettingsDialog
           settings={settings()}
-          cacheBytes={cacheBytes()}
+          models={MODELS}
+          cacheBytes={totalCacheBytes()}
           busy={generating()}
           onClose={() => setSettingsOpen(false)}
           onSave={saveSettings}
@@ -659,7 +729,14 @@ export default function App() {
         total={progress().total}
         speed={speed()}
         cachedBytes={cacheBytes()}
-        onRetry={() => loadModel(settings().device)}
+        choosing={modelStatus() === "idle"}
+        models={MODELS}
+        modelId={selectedModelId()}
+        modelCache={modelCache()}
+        onSelectModel={setSelectedModelId}
+        onStart={startModel}
+        onChangeModel={changeModel}
+        onRetry={() => loadModel(selectedModelId(), settings().device)}
       />
 
       <Show when={toast()}>

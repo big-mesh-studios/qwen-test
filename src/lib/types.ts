@@ -4,6 +4,7 @@ export type Theme = "dark" | "light";
 export type ModelStatus = "idle" | "loading" | "ready" | "error";
 
 export type Stage =
+  | "idle"
   | "cache-check"
   | "downloading"
   | "initializing"
@@ -42,11 +43,16 @@ export interface Settings {
   maxNewTokens: number;
   repetitionPenalty: number;
   device: Device;
+  modelId: string;
 }
 
 export interface CacheStats {
   bytes: number;
   files: number;
+}
+
+export interface ModelCacheStats extends CacheStats {
+  modelId: string;
 }
 
 export interface GenerationOptions {
@@ -59,7 +65,7 @@ export interface GenerationOptions {
 export type ChatRequestMessage = Pick<ChatMessage, "role" | "content">;
 
 export type WorkerRequest =
-  | { type: "load"; device?: Device }
+  | { type: "load"; modelId?: string; device?: Device }
   | {
       type: "generate";
       id: string;
@@ -67,7 +73,8 @@ export type WorkerRequest =
       options?: GenerationOptions;
     }
   | { type: "abort" }
-  | { type: "cache-stats" }
+  | { type: "cache-stats"; modelId?: string }
+  | { type: "cache-summary" }
   | { type: "clear-cache" };
 
 export type WorkerResponse =
@@ -78,10 +85,11 @@ export type WorkerResponse =
       total: number;
       percent?: number;
     }
-  | { type: "cache"; bytes: number; files: number }
+  | { type: "cache"; modelId: string; bytes: number; files: number }
+  | { type: "cache-summary"; models: ModelCacheStats[] }
   | { type: "cache-cleared" }
   | { type: "warning"; message: string }
-  | { type: "ready"; device: Device; cachedBytes?: number }
+  | { type: "ready"; modelId: string; device: Device; cachedBytes?: number }
   | { type: "token"; id: string; text: string }
   | {
       type: "done";

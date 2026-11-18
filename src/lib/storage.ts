@@ -7,6 +7,7 @@ import {
   type StoredConversation,
 } from "./idb";
 import { clamp, uid } from "./utils";
+import { DEFAULT_MODEL_ID, getModel } from "./models";
 import type { ChatMessage, Conversation, Settings, Theme } from "./types";
 
 const SETTINGS_KEY = "qwen-coder-settings";
@@ -14,12 +15,13 @@ const THEME_KEY = "qwen-coder-theme";
 
 export const DEFAULT_SETTINGS: Settings = {
   systemPrompt:
-    "You are Qwen Coder, a concise and helpful coding assistant. Answer with Markdown. Put code in fenced code blocks with a language tag. Explain the important parts briefly, and mention trade-offs or edge cases when they matter.",
+    "You are a concise and helpful coding assistant. Answer with Markdown. Put code in fenced code blocks with a language tag. Explain the important parts briefly, and mention trade-offs or edge cases when they matter.",
   temperature: 0.6,
   topP: 0.95,
   maxNewTokens: 512,
   repetitionPenalty: 1.05,
   device: "wasm",
+  modelId: DEFAULT_MODEL_ID,
 };
 
 export function createConversation(): Conversation {
@@ -117,6 +119,7 @@ export function loadSettings(): Settings {
         1.5,
       ),
       device: parsed.device === "webgpu" ? "webgpu" : "wasm",
+      modelId: getModel(parsed.modelId).id,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

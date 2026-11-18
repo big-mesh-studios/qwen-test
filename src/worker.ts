@@ -7,21 +7,22 @@ import {
   type ChatCompletionMessage,
 } from "@wllama/wllama";
 import { QWEN35_CHAT_TEMPLATE } from "./lib/qwen35-chat-template";
+import { getModel, MODELS, modelUrl, type ModelSpec } from "./lib/models";
 import type {
+  CacheStats,
   ChatRequestMessage,
   Device,
   GenerationOptions,
+  ModelCacheStats,
   WorkerRequest,
   WorkerResponse,
 } from "./lib/types";
 
-const MODEL_REPO = "KoarAI/Qwen3.5-2B-text-only-Q4_K_M-GGUF";
-const MODEL_FILE = "qwen3.5-2b-text-only-q4_k_m.gguf";
-// Resolving the file URL directly (instead of asking the HF API) lets a
-// fully cached model load without contacting Hugging Face.
-const MODEL_URL = `https://huggingface.co/${MODEL_REPO}/resolve/main/${MODEL_FILE}`;
-const MODEL_BYTES = 1_274_388_448;
-const CONTEXT_TOKENS = 4096;
+// Some GGUFs ship without tokenizer.chat_template. Supply the matching template
+// only for those files.
+const CHAT_TEMPLATES: Record<string, string> = {
+  "qwen35-2b": QWEN35_CHAT_TEMPLATE,
+};
 
 // Keep the old repo/file names so "Clear cache" can reclaim the previous model
 // after users upgrade.
@@ -35,6 +36,7 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 
 let engine: Wllama | null = null;
 let loadedDevice: Device | null = null;
+let loadedModelId: string | null = null;
 let cacheManager: CacheManager | null = null;
 let loadToken = 0;
 let activeGeneration: { id: string; controller: AbortController } | null = null;
@@ -54,16 +56,16 @@ function describeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
 
   if (/no supported storage backend|opfs/i.test(message)) {
-    return "This browser cannot open its private file storage (OPFS), which Qwen needs to cache the model. Try a recent version of Chrome, Edge, Firefox, or Safari.";
+    return "This browser cannot open its private file storage (OPFS), which the model needs to cache its weights. Try a recent version of Chrome, Edge, Firefox, or Safari.";
   }
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
-    return `Network error while loading Qwen. Check your connection and try again. (${message})`;
+    return `Network error while loading the model. Check your connection and try again. (${message})`;
   }
   if (/quota|no space|disk space/i.test(message)) {
     return "The browser ran out of storage while saving the model. Free some space and try again.";
   }
   if (/out of memory|oom/i.test(message)) {
-    return "The browser ran out of memory while loading Qwen. Close other tabs, or try the WASM backend.";
+    return "The browser ran out of memory while loading the model. Close other tabs, choose a smaller model, or try the WASM backend.";
   }
   if (/webgpu|gpu/i.test(message)) {
     return `WebGPU could not start: ${message}`;
@@ -82,24 +84,30 @@ function getCacheManager(): CacheManager | null {
   }
 }
 
+function matchesModel(entry: CacheEntry, model: ModelSpec): boolean {
+  const url = (entry.metadata?.originalURL ?? "").toLowerCase();
+  const name = entry.name.toLowerCase();
+  const file = model.file.toLowerCase();
+  return url.includes(file) || name.includes(file);
+}
+
 function isModelEntry(entry: CacheEntry): boolean {
   const url = entry.metadata?.originalURL ?? "";
   const name = entry.name.toLowerCase();
   return (
-    url.includes(MODEL_REPO) ||
+    MODELS.some((model) => matchesModel(entry, model)) ||
     url.includes(LEGACY_MODEL_REPO) ||
-    name.includes(MODEL_FILE) ||
     name.includes(LEGACY_MODEL_FILE.toLowerCase())
   );
 }
 
-async function getCacheStats(): Promise<{ bytes: number; files: number }> {
+async function getModelCacheStats(model: ModelSpec): Promise<CacheStats> {
   const manager = engine?.cacheManager ?? getCacheManager();
   if (!manager) return { bytes: 0, files: 0 };
 
   try {
     const entries = await manager.list();
-    return entries.filter(isModelEntry).reduce(
+    return entries.filter((entry) => matchesModel(entry, model)).reduce(
       (stats, entry) => ({
         bytes: stats.bytes + entry.size,
         files: stats.files + 1,
@@ -108,6 +116,31 @@ async function getCacheStats(): Promise<{ bytes: number; files: number }> {
     );
   } catch {
     return { bytes: 0, files: 0 };
+  }
+}
+
+async function getAllModelCacheStats(): Promise<ModelCacheStats[]> {
+  const manager = engine?.cacheManager ?? getCacheManager();
+  if (!manager) {
+    return MODELS.map((model) => ({ modelId: model.id, bytes: 0, files: 0 }));
+  }
+
+  try {
+    const entries = await manager.list();
+    return MODELS.map((model) => {
+      const stats = entries
+        .filter((entry) => matchesModel(entry, model))
+        .reduce(
+          (total, entry) => ({
+            bytes: total.bytes + entry.size,
+            files: total.files + 1,
+          }),
+          { bytes: 0, files: 0 },
+        );
+      return { modelId: model.id, ...stats };
+    });
+  } catch {
+    return MODELS.map((model) => ({ modelId: model.id, bytes: 0, files: 0 }));
   }
 }
 
@@ -130,6 +163,7 @@ async function disposeEngine(): Promise<void> {
   const previous = engine;
   engine = null;
   loadedDevice = null;
+  loadedModelId = null;
   try {
     await previous.exit();
   } catch {
@@ -138,21 +172,28 @@ async function disposeEngine(): Promise<void> {
 }
 
 async function loadModel(
+  modelId: string = MODELS[0].id,
   device: Device = "wasm",
   allowFallback = true,
 ): Promise<void> {
+  const model = getModel(modelId);
   const token = ++loadToken;
 
   post({ type: "stage", stage: "cache-check" });
-  const before = await getCacheStats();
+  const before = await getModelCacheStats(model);
   if (token !== loadToken) return;
 
-  post({ type: "cache", bytes: before.bytes, files: before.files });
-  const cached = before.bytes >= MODEL_BYTES;
+  post({ type: "cache", modelId: model.id, bytes: before.bytes, files: before.files });
+  const cached = before.bytes >= model.bytes;
   post({ type: "stage", stage: cached ? "initializing" : "downloading" });
 
-  if (engine && loadedDevice === device && engine.isModelLoaded()) {
-    post({ type: "ready", device, cachedBytes: before.bytes });
+  if (
+    engine &&
+    loadedDevice === device &&
+    loadedModelId === model.id &&
+    engine.isModelLoaded()
+  ) {
+    post({ type: "ready", modelId: model.id, device, cachedBytes: before.bytes });
     return;
   }
 
@@ -181,7 +222,7 @@ async function loadModel(
       message: "WebGPU is not available in this browser. Falling back to the WASM backend.",
     });
     if (allowFallback) {
-      await loadModel("wasm", false);
+      await loadModel(model.id, "wasm", false);
     } else {
       post({
         type: "error",
@@ -192,20 +233,22 @@ async function loadModel(
     return;
   }
 
+  const chatTemplate = CHAT_TEMPLATES[model.id];
+
   try {
-    await next.loadModelFromUrl(MODEL_URL, {
+    await next.loadModelFromUrl(modelUrl(model), {
       useCache: true,
-      n_ctx: CONTEXT_TOKENS,
-      // The GGUF was converted without tokenizer.chat_template. Supply the
-      // official Qwen3.5 template so createChatCompletion() works.
-      chat_template: QWEN35_CHAT_TEMPLATE,
+      n_ctx: model.contextTokens,
+      // Most Bonsai packs carry their own template; the community Qwen GGUF
+      // does not, so supply the official template for that file only.
+      ...(chatTemplate ? { chat_template: chatTemplate } : {}),
       jinja: true,
       // wllama defaults to offloading every layer. WASM must explicitly use 0.
       n_gpu_layers: device === "webgpu" ? 99999 : 0,
       progressCallback: ({ loaded, total }) => {
         if (token !== loadToken || cached) return;
 
-        const safeTotal = total > 0 ? total : MODEL_BYTES;
+        const safeTotal = total > 0 ? total : model.bytes;
         post({
           type: "progress",
           loaded,
@@ -227,10 +270,11 @@ async function loadModel(
 
     engine = next;
     loadedDevice = device;
+    loadedModelId = model.id;
 
-    const after = await getCacheStats();
-    post({ type: "cache", bytes: after.bytes, files: after.files });
-    post({ type: "ready", device, cachedBytes: after.bytes });
+    const after = await getModelCacheStats(model);
+    post({ type: "cache", modelId: model.id, bytes: after.bytes, files: after.files });
+    post({ type: "ready", modelId: model.id, device, cachedBytes: after.bytes });
   } catch (error) {
     try {
       await next.exit();
@@ -243,9 +287,9 @@ async function loadModel(
     if (device === "webgpu" && allowFallback) {
       post({
         type: "warning",
-        message: `WebGPU could not load Qwen (${error instanceof Error ? error.message : String(error)}). Falling back to WASM.`,
+        message: `WebGPU could not load ${model.name} (${error instanceof Error ? error.message : String(error)}). Falling back to WASM.`,
       });
-      await loadModel("wasm", false);
+      await loadModel(model.id, "wasm", false);
       return;
     }
 
@@ -277,7 +321,7 @@ async function generate({
       type: "error",
       scope: "generate",
       id,
-      message: "Qwen is already generating a response.",
+      message: "The model is already generating a response.",
     });
     return;
   }
@@ -326,7 +370,8 @@ async function generate({
       top_p: topP,
       penalty_repeat: repetitionPenalty,
       cache_prompt: true,
-      // Qwen3.5's template enables an empty think block when this is false.
+      // Qwen3.5 and Bonsai both accept this template flag. Non-thinking mode
+      // keeps short coding answers from turning into a long reasoning trace.
       chat_template_kwargs: { enable_thinking: false },
     });
 
@@ -378,8 +423,8 @@ async function clearModelCache(): Promise<void> {
     }
   }
 
-  const stats = await getCacheStats();
-  post({ type: "cache", bytes: stats.bytes, files: stats.files });
+  const stats = await getAllModelCacheStats();
+  post({ type: "cache-summary", models: stats });
   post({ type: "cache-cleared" });
   if (!removed) {
     post({
@@ -392,7 +437,7 @@ async function clearModelCache(): Promise<void> {
 async function handleRequest(message: WorkerRequest): Promise<void> {
   switch (message.type) {
     case "load":
-      await loadModel(message.device ?? "wasm");
+      await loadModel(message.modelId ?? MODELS[0].id, message.device ?? "wasm");
       break;
 
     case "generate":
@@ -411,8 +456,20 @@ async function handleRequest(message: WorkerRequest): Promise<void> {
       break;
 
     case "cache-stats": {
-      const stats = await getCacheStats();
-      post({ type: "cache", bytes: stats.bytes, files: stats.files });
+      if (message.modelId) {
+        const model = getModel(message.modelId);
+        const stats = await getModelCacheStats(model);
+        post({ type: "cache", modelId: model.id, bytes: stats.bytes, files: stats.files });
+      } else {
+        const models = await getAllModelCacheStats();
+        post({ type: "cache-summary", models });
+      }
+      break;
+    }
+
+    case "cache-summary": {
+      const models = await getAllModelCacheStats();
+      post({ type: "cache-summary", models });
       break;
     }
 

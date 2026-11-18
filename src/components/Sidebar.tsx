@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 import type { Conversation, ModelStatus } from "../lib/types";
+import type { ModelSpec } from "../lib/models";
 import { formatBytes, previewText, relativeTime } from "../lib/utils";
 import {
   IconAlert,
@@ -60,8 +61,10 @@ interface SidebarProps {
   conversations: Conversation[];
   activeId: string | null;
   open: boolean;
+  model: ModelSpec;
   modelStatus: ModelStatus;
   cacheBytes: number;
+  totalCacheBytes: number;
   progressPercent: number | null;
   progressLoaded: number;
   progressTotal: number;
@@ -83,7 +86,7 @@ export function Sidebar(props: SidebarProps) {
       case "error":
         return "Model failed";
       default:
-        return "Starting up";
+        return "Choose a model";
     }
   };
 
@@ -161,9 +164,11 @@ export function Sidebar(props: SidebarProps) {
 
           <div class="model-card-name">
             <IconCpu size={15} />
-            <span>Qwen3.5-2B</span>
+            <span>{props.model.name}</span>
           </div>
-          <div class="model-card-meta">Q4_K_M · GGUF · runs in your browser</div>
+          <div class="model-card-meta">
+            {props.model.quantization} · GGUF · runs in your browser
+          </div>
 
           <Show when={props.modelStatus === "loading"}>
             <div class="mini-progress">
@@ -198,7 +203,7 @@ export function Sidebar(props: SidebarProps) {
               <IconSliders size={13} />
               Settings
             </button>
-            <Show when={props.cacheBytes > 0}>
+            <Show when={props.totalCacheBytes > 0}>
               <button type="button" onClick={props.onClearCache}>
                 <IconTrash size={13} />
                 Clear cache

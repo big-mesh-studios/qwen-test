@@ -1,11 +1,15 @@
-import { createSignal, onSettled, Show, untrack } from "solid-js";
+import { createSignal, For, onSettled, Show, untrack } from "solid-js";
 import { Portal } from "@solidjs/web";
 import type { Device, Settings } from "../lib/types";
+import type { ModelSpec } from "../lib/models";
+import { getModel } from "../lib/models";
+import { DEFAULT_SETTINGS } from "../lib/storage";
 import { formatBytes } from "../lib/utils";
 import {
   IconAlert,
   IconClose,
   IconDatabase,
+  IconRefresh,
   IconSliders,
   IconTrash,
   IconZap,
@@ -13,6 +17,7 @@ import {
 
 interface SettingsDialogProps {
   settings: Settings;
+  models: ModelSpec[];
   cacheBytes: number;
   busy: boolean;
   onClose: () => void;
@@ -28,8 +33,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
   const [maxNewTokens, setMaxNewTokens] = createSignal(initial.maxNewTokens);
   const [repetitionPenalty, setRepetitionPenalty] = createSignal(initial.repetitionPenalty);
   const [device, setDevice] = createSignal<Device>(initial.device);
+  const [modelId, setModelId] = createSignal(initial.modelId);
 
+  const selectedModel = () => getModel(modelId());
   const deviceChanged = () => device() !== props.settings.device;
+  const modelChanged = () => modelId() !== props.settings.modelId;
 
   onSettled(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -47,7 +55,16 @@ export function SettingsDialog(props: SettingsDialogProps) {
       maxNewTokens: Math.round(Number(maxNewTokens())),
       repetitionPenalty: Number(repetitionPenalty()),
       device: device(),
+      modelId: modelId(),
     });
+  };
+
+  const resetToDefaults = () => {
+    const confirmed = window.confirm(
+      "Reset all settings, including the system prompt, to their defaults?",
+    );
+    if (!confirmed) return;
+    props.onSave({ ...DEFAULT_SETTINGS });
   };
 
   return (
@@ -161,8 +178,35 @@ export function SettingsDialog(props: SettingsDialogProps) {
             <section class="settings-section">
               <div class="settings-heading">
                 <h3>Runtime</h3>
-                <p>WebGPU is faster when available. WASM works everywhere.</p>
+                <p>Switch models without leaving the page. Each file is cached separately.</p>
               </div>
+
+              <label class="field field--select">
+                <span class="field-top">
+                  <span>Model</span>
+                </span>
+                <select
+                  value={modelId()}
+                  disabled={props.busy}
+                  onChange={(event) => setModelId(event.currentTarget.value)}
+                >
+                  <For each={props.models}>
+                    {(model) => (
+                      <option value={model.id}>
+                        {model.name} · {model.quantization} · {formatBytes(model.bytes)}
+                      </option>
+                    )}
+                  </For>
+                </select>
+                <span class="field-hint">
+                  {props.busy
+                    ? "Stop the current response before switching models."
+                    : `Saving loads ${selectedModel().name}. Its ${formatBytes(selectedModel().bytes)} file is reused from the browser cache if it was downloaded before.`}
+                </span>
+                <Show when={selectedModel().warning}>
+                  <span class="field-hint field-hint--warning">{selectedModel().warning}</span>
+                </Show>
+              </label>
 
               <label class="field field--select">
                 <span class="field-top">
@@ -196,33 +240,49 @@ export function SettingsDialog(props: SettingsDialogProps) {
                   <IconZap size={14} />
                   Precision
                 </span>
-                <strong>Q4_K_M · GGUF</strong>
+                <strong>{selectedModel().quantization} · GGUF</strong>
               </div>
 
               <div class="settings-kv">
                 <span>
                   <IconDatabase size={14} />
-                  Model file in browser storage
+                  All cached model files
                 </span>
                 <strong>{formatBytes(props.cacheBytes)}</strong>
               </div>
             </section>
           </div>
 
-          <Show when={deviceChanged()}>
+          <Show when={modelChanged() || deviceChanged()}>
             <div class="modal-warning">
               <IconAlert size={15} />
               <span>
-                Saving will reload Qwen on the {device() === "webgpu" ? "WebGPU" : "WASM"} backend.
+                Saving will load {selectedModel().name} on the{" "}
+                {device() === "webgpu" ? "WebGPU" : "WASM"} backend.
+                {modelChanged()
+                  ? ` About ${formatBytes(selectedModel().bytes)} is reused from cache or downloaded once.`
+                  : " The cached weights are reused."}
               </span>
             </div>
           </Show>
 
           <footer class="modal-foot">
-            <button type="button" class="button button--danger" onClick={props.onClearCache}>
-              <IconTrash size={14} />
-              Clear model cache
-            </button>
+            <div class="modal-foot-left">
+              <button
+                type="button"
+                class="button button--ghost"
+                onClick={resetToDefaults}
+                disabled={props.busy}
+                title="Restore the default prompt, sampling values, model, and backend"
+              >
+                <IconRefresh size={14} />
+                Reset defaults
+              </button>
+              <button type="button" class="button button--danger" onClick={props.onClearCache}>
+                <IconTrash size={14} />
+                Clear model cache
+              </button>
+            </div>
             <div class="modal-foot-right">
               <button type="button" class="button button--ghost" onClick={props.onClose}>
                 Cancel

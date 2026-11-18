@@ -1,16 +1,16 @@
+import { getModel, MODELS } from "./lib/models";
 import type { ChatRequestMessage, WorkerRequest, WorkerResponse } from "./lib/types";
 
 /**
  * Dev-only stand-in for the real model worker.
  *
- * Open the app with `?mock=1` to exercise the chat UI (streaming, stop,
- * persistence, Markdown) without downloading the ~1.27 GB GGUF.
+ * Open the app with `?mock=1` to exercise the model picker and chat UI
+ * (streaming, stop, persistence, Markdown) without downloading a GGUF.
  */
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-const MOCK_BYTES = 1_274_388_448;
 
 let controller: AbortController | null = null;
-let cached = false;
+const cachedModels = new Set<string>();
 
 function post(message: WorkerResponse): void {
   scope.postMessage(message);
@@ -38,7 +38,7 @@ function replyFor(messages: ChatRequestMessage[]): string {
     "console.log(answer);",
     "```",
     "",
-    "Switch to the real Qwen3.5 model by opening the app without `?mock=1`.",
+    "Switch to a real model by opening the app without `?mock=1`.",
   ].join("\n");
 }
 
@@ -53,15 +53,31 @@ function chunkText(text: string): string[] {
   return chunks;
 }
 
-async function load(): Promise<void> {
+function cacheSummary() {
+  return MODELS.map((model) => ({
+    modelId: model.id,
+    bytes: cachedModels.has(model.id) ? model.bytes : 0,
+    files: cachedModels.has(model.id) ? 1 : 0,
+  }));
+}
+
+async function load(modelId?: string): Promise<void> {
+  const model = getModel(modelId);
+  const isCached = cachedModels.has(model.id);
+
   post({ type: "stage", stage: "cache-check" });
   await sleep(120);
-  post({ type: "cache", bytes: cached ? MOCK_BYTES : 0, files: cached ? 1 : 0 });
+  post({
+    type: "cache",
+    modelId: model.id,
+    bytes: isCached ? model.bytes : 0,
+    files: isCached ? 1 : 0,
+  });
   post({ type: "stage", stage: "initializing" });
   await sleep(220);
-  cached = true;
-  post({ type: "cache", bytes: MOCK_BYTES, files: 1 });
-  post({ type: "ready", device: "wasm", cachedBytes: MOCK_BYTES });
+  cachedModels.add(model.id);
+  post({ type: "cache", modelId: model.id, bytes: model.bytes, files: 1 });
+  post({ type: "ready", modelId: model.id, device: "wasm", cachedBytes: model.bytes });
 }
 
 async function generate(id: string, messages: ChatRequestMessage[]): Promise<void> {
@@ -106,7 +122,7 @@ async function generate(id: string, messages: ChatRequestMessage[]): Promise<voi
 async function handleRequest(message: WorkerRequest): Promise<void> {
   switch (message.type) {
     case "load":
-      await load();
+      await load(message.modelId);
       break;
 
     case "generate":
@@ -118,12 +134,27 @@ async function handleRequest(message: WorkerRequest): Promise<void> {
       break;
 
     case "cache-stats":
-      post({ type: "cache", bytes: cached ? MOCK_BYTES : 0, files: cached ? 1 : 0 });
+      if (message.modelId) {
+        const model = getModel(message.modelId);
+        const isCached = cachedModels.has(model.id);
+        post({
+          type: "cache",
+          modelId: model.id,
+          bytes: isCached ? model.bytes : 0,
+          files: isCached ? 1 : 0,
+        });
+      } else {
+        post({ type: "cache-summary", models: cacheSummary() });
+      }
+      break;
+
+    case "cache-summary":
+      post({ type: "cache-summary", models: cacheSummary() });
       break;
 
     case "clear-cache":
-      cached = false;
-      post({ type: "cache", bytes: 0, files: 0 });
+      cachedModels.clear();
+      post({ type: "cache-summary", models: cacheSummary() });
       post({ type: "cache-cleared" });
       break;
 

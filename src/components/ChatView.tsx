@@ -1,6 +1,8 @@
 import { createEffect, For, Show, type Component } from "solid-js";
 import { Dynamic } from "@solidjs/web";
 import type { ChatMessage as ChatMessageModel } from "../lib/types";
+import type { ModelSpec } from "../lib/models";
+import { formatBytes } from "../lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import {
   IconBook,
@@ -51,6 +53,7 @@ const SUGGESTIONS: Suggestion[] = [
 
 interface ChatViewProps {
   messages: ChatMessageModel[];
+  model: ModelSpec;
   onPick: (prompt: string) => void;
 }
 
@@ -91,7 +94,7 @@ export function ChatView(props: ChatViewProps) {
       <div class="chat-thread">
         <Show
           when={props.messages.length > 0}
-          fallback={<EmptyState onPick={props.onPick} />}
+          fallback={<EmptyState model={props.model} onPick={props.onPick} />}
         >
           <For each={props.messages} keyed={(message) => message.id}>
             {(message) => <ChatMessage message={message()} />}
@@ -103,7 +106,7 @@ export function ChatView(props: ChatViewProps) {
   );
 }
 
-function EmptyState(props: { onPick: (prompt: string) => void }) {
+function EmptyState(props: { model: ModelSpec; onPick: (prompt: string) => void }) {
   return (
     <section class="empty-state">
       <div class="hero-mark" aria-hidden="true">
@@ -112,7 +115,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
 
       <p class="eyebrow">
         <span class="eyebrow-dot" />
-        Qwen3.5 · 2B · Q4_K_M · local
+        {props.model.name} · {props.model.quantization} · local
       </p>
 
       <h1>
@@ -120,7 +123,7 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
       </h1>
 
       <p class="hero-copy">
-        A compact 2B model that runs entirely in your browser. No API keys, no server, no data
+        A compact local model that runs entirely in your browser. No API keys, no server, no data
         leaving this tab.
       </p>
 
@@ -145,8 +148,8 @@ function EmptyState(props: { onPick: (prompt: string) => void }) {
       </div>
 
       <p class="hero-foot">
-        First run downloads the GGUF model (~1.27 GB). It is cached in the browser's private file
-        storage (OPFS) so later startups do not download it again.
+        The model is cached in the browser's private file storage (OPFS), so later startups do not
+        download {formatBytes(props.model.bytes)} again.
       </p>
     </section>
   );
